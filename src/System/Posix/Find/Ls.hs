@@ -1,3 +1,4 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE DataKinds #-}
@@ -8,8 +9,9 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Catch
 
-import Data.Maybe
 import Data.List (sort)
+
+import qualified Data.ByteString    as B
 
 import qualified Data.Text          as T
 import qualified Data.Text.Encoding as T
@@ -26,11 +28,59 @@ import System.Posix.Find.Types
 import System.Posix.Text.Path
 
 
-discriminatePath :: Bool
+data FollowSymLinks   = FollowSymLinks
+data SymLinksAreFiles = SymLinksAreFiles
+
+
+class SymLinkStrategy strat where
+    type StratResult strat :: FSNodeType
+
+    discriminateLink :: strat
+                     -> [Posix.FileID]
+                     -> Posix.FileStatus
+                     -> (B.ByteString, T.Text, Path Abs File)
+                     -> IO (Maybe ([Posix.FileID], NodeListEntry (StratResult strat)))
+
+
+instance SymLinkStrategy FollowSymLinks where
+    type StratResult FollowSymLinks = 'WithLinks
+
+    discriminateLink _ visited stat (bpath, tpath, path)
+      | Posix.isSymbolicLink stat = do
+          let inode = Posix.fileID stat
+
+          (visited', target) <- do
+              when (inode `elem` visited) $ do
+                  throwM (FSCycleError tpath)
+
+              tdest <- T.decodeUtf8 <$> Posix.readSymbolicLink bpath
+
+              case canonicalizeBeside path tdest of
+                  Right p' -> discriminatePath FollowSymLinks (inode:visited) p'
+                  Left _   -> throwM (FileNotFoundError tdest)
+
+          let link = Link path
+
+          return . Just $
+            case target of
+                FileEntry file -> (visited', FileEntry (SymLink stat link file))
+                DirEntry  dir  -> (visited', DirEntry  (SymLink stat link dir))
+
+      | otherwise = return Nothing
+
+
+instance SymLinkStrategy SymLinksAreFiles where
+    type StratResult SymLinksAreFiles = 'WithoutLinks
+
+    discriminateLink _ _ _ _ = return Nothing
+
+
+discriminatePath :: SymLinkStrategy strat
+                 => strat
                  -> [Posix.FileID]
                  -> Path Abs File
-                 -> IO ([Posix.FileID], NodeListEntry 'WithLinks)
-discriminatePath followSymLinks = go
+                 -> IO ([Posix.FileID], NodeListEntry (StratResult strat))
+discriminatePath strat = go
   where
     go visited path = do
       let bpath = toByteString path
@@ -39,41 +89,32 @@ discriminatePath followSymLinks = go
       stat <- Posix.getSymbolicLinkStatus bpath
                 `catchAll` \_ -> throwM (FileNotFoundError tpath)
 
-      let inode = Posix.fileID stat
+      discr <- discriminateLink strat visited stat (bpath, tpath, path)
 
-      if Posix.isSymbolicLink stat && followSymLinks
-        then do
-          (visited', target) <- do
-              when (inode `elem` visited) $ do
-                  throwM (FSCycleError tpath)
+      let inode    = Posix.fileID stat
+          visited' = inode:visited
 
-              tdest <- T.decodeUtf8 <$> Posix.readSymbolicLink bpath
+      return $
+        case discr of
+            Just n -> n
 
-              case canonicalizeBeside path tdest of
-                  Right p' -> go (inode:visited) p'
-                  Left _   -> throwM (FileNotFoundError tdest)
-
-          let link = Link path
-
-          case target of
-              FileEntry file -> retF visited' (SymLink stat link file)
-              DirEntry  dir  -> retD visited' (SymLink stat link dir)
-        else do
-          let visited' = inode:visited
-
-          if Posix.isDirectory stat
-            then retD visited' (DirNode  stat (asDirPath  path))
-            else retF visited' (FileNode stat (asFilePath path))
-
-    retF visited' n = return (visited', FileEntry n)
-    retD visited' n = return (visited', DirEntry  n)
+            Nothing
+              | Posix.isDirectory stat ->
+                  (visited', DirEntry  (DirNode  stat (asDirPath  path)))
+              | otherwise ->
+                  (visited', FileEntry (FileNode stat (asFilePath path)))
 
 
-ls :: (MonadIO m, MonadCatch m) => Bool -> Path Abs File -> IO (LsL m)
-ls followSymLinks = go []
+ls :: forall m io strat.
+        ( MonadIO m, MonadIO io, MonadCatch m
+        , SymLinkStrategy strat, HasErrors (StratResult strat) ~ 'True )
+   => strat
+   -> Path Abs Dir
+   -> io (LsN m (StratResult strat))
+ls strat = liftIO . go []
   where
     go visited root = do
-        (visited', entry) <- discriminatePath followSymLinks visited root
+        (visited', entry) <- discriminatePath strat visited (asFilePath root)
 
         return $
           case entry of
@@ -85,8 +126,8 @@ ls followSymLinks = go []
                   contents <- liftIO $ getDirectoryContents (toString root)
 
                   each (sort $ filter valid contents)
-                    >-> P.map  (unsafeRelFile . fromJust . dropTrailingSlash . T.pack)
-                    >-> P.map  (asDirPath root </>)
+                    >-> P.map  (unsafeRelDir . addTrailingSlash . T.pack)
+                    >-> P.map  (root </>)
                     >-> P.mapM (liftIO . handling . go visited')
 
     valid :: FilePath -> Bool
@@ -95,6 +136,6 @@ ls followSymLinks = go []
     valid ".." = False
     valid _    = True
 
-    handling :: MonadCatch n => n (LsL m) -> n (LsL m)
+    handling :: IO (LsN m (StratResult strat)) -> IO (LsN m (StratResult strat))
     handling = handle (\(FSCycleError l)      -> return (FileP (FSCycle l)))
              . handle (\(FileNotFoundError p) -> return (FileP (Missing p)))

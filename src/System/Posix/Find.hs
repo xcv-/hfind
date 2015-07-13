@@ -7,6 +7,10 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Catch
 
+import qualified Data.ByteString    as B
+import qualified Data.Text          as T
+import qualified Data.Text.Encoding as T
+
 import Data.List (sort)
 
 import Pipes
@@ -22,3 +26,31 @@ import System.Posix.Text.Path
 import System.Posix.Find.Types
 import System.Posix.Find.Combinators
 import System.Posix.Find.Ls
+
+
+-- examples simulating plain unix find
+
+find :: Path Abs Dir -> IO ()
+find p = runEffect $
+    (ls SymLinksAreFiles p >>= yield)
+      >-> onError report
+      >-> is resolved
+      >-> flatten
+      >-> asPaths
+      >-> asFiles
+      >-> plainText
+      >-> P.map T.unpack
+      >-> P.stdoutLn
+
+findL :: Path Abs Dir -> IO ()
+findL p = runEffect $
+    (ls FollowSymLinks p >>= yield)
+      >-> followLinks
+      >-> onError report
+      >-> is resolved
+      >-> flatten
+      >-> asPaths
+      >-> asFiles
+      >-> plainText
+      >-> P.map T.unpack
+      >-> P.stdoutLn

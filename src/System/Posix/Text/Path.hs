@@ -16,6 +16,8 @@ import qualified Data.Text.Encoding as T
 
 import qualified Data.ByteString as B
 
+import qualified System.Directory as D
+
 
 data PathType = Rel  | Abs
 data PathDest = File | Dir
@@ -71,18 +73,20 @@ instance CoerciblePath 'Dir 'Dir where
     coercePath = id
 
 
-dropTrailingSlash :: RawPath -> Maybe RawPath
+dropTrailingSlash :: RawPath -> RawPath
 dropTrailingSlash p
-  | T.null p        = Just p
-  | p == "/"        = Nothing -- WARNING: removing the slash here could cause a lot of pain
-  | T.last p == '/' = Just (T.init p)
-  | otherwise       = Just p
+  | p == "/"        = -- WARNING: removing the slash here could cause a lot of pain
+                      error "'/' passed to dropTrailingSlash"
+  | T.null p        = p
+  | T.last p == '/' = T.init p
+  | otherwise       = p
 
-addTrailingSlash :: RawPath -> Maybe RawPath
+addTrailingSlash :: RawPath -> RawPath
 addTrailingSlash p
-  | T.null p        = Nothing -- WARNING: adding a slash here could cause a lot of pain
-  | T.last p == '/' = Just p
-  | otherwise       = Just (T.snoc p '/')
+  | T.null p        = -- WARNING: adding a slash here could cause a lot of pain
+                      error "'' passed to addTrailingSlash"
+  | T.last p == '/' = p
+  | otherwise       = T.snoc p '/'
 
 
 asFilePath :: CoerciblePath t File => Path Abs t -> Path Abs File
@@ -150,3 +154,8 @@ canonicalizeBeside :: CoerciblePath t File
                    => Path Abs t -> RawPath -> Either RawPath (Path Abs File)
 canonicalizeBeside sibling p =
     flip canonicalizeUnder p =<< maybe (Left p) Right (parent sibling)
+
+canonicalizeFromHere :: RawPath -> IO (Either RawPath (Path Abs File))
+canonicalizeFromHere p = do
+    here <- unsafeAbsDir . addTrailingSlash . T.pack <$> D.getCurrentDirectory
+    return (canonicalizeUnder here p)

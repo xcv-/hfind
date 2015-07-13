@@ -80,7 +80,7 @@ nodePath _ =
 
 data ListEntry fp dp = FileEntry fp | DirEntry dp
 
-type PathListEntry s = ListEntry (Path Abs File) (Path Abs Dir)
+type PathListEntry   = ListEntry (Path Abs File) (Path Abs Dir)
 type NodeListEntry s = ListEntry (FSNode File s) (FSNode Dir s)
 
 instance (Show fp, Show dp) => Show (ListEntry fp dp) where

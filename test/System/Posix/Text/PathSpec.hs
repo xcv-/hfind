@@ -62,21 +62,22 @@ spec = do
 
         context "addTrailingSlash" $ do
             it "works" $ do
-                addTrailingSlash ""      `shouldBe` Nothing
-                addTrailingSlash "a"     `shouldBe` Just "a/"
-                addTrailingSlash "/"     `shouldBe` Just "/"
-                addTrailingSlash "/a"    `shouldBe` Just "/a/"
-                addTrailingSlash "/a/b"  `shouldBe` Just "/a/b/"
-                addTrailingSlash "/a/b/" `shouldBe` Just "/a/b/"
+                addTrailingSlash ""      `shouldError` ()
+                addTrailingSlash "a"     `shouldBe` "a/"
+                addTrailingSlash "/"     `shouldBe` "/"
+                addTrailingSlash "/a"    `shouldBe` "/a/"
+                addTrailingSlash "/a/b"  `shouldBe` "/a/b/"
+                addTrailingSlash "/a/b/" `shouldBe` "/a/b/"
 
-        context "addTrailingSlash" $ do
+        context "dropTrailingSlash" $ do
             it "works" $ do
-                addTrailingSlash ""      `shouldBe` Nothing
-                addTrailingSlash "a"     `shouldBe` Just "a/"
-                addTrailingSlash "/"     `shouldBe` Just "/"
-                addTrailingSlash "/a"    `shouldBe` Just "/a/"
-                addTrailingSlash "/a/b"  `shouldBe` Just "/a/b/"
-                addTrailingSlash "/a/b/" `shouldBe` Just "/a/b/"
+                dropTrailingSlash ""      `shouldBe` ""
+                dropTrailingSlash "a"     `shouldBe` "a"
+                dropTrailingSlash "/"     `shouldError` ()
+                dropTrailingSlash "/a"    `shouldBe` "/a"
+                dropTrailingSlash "/a/b"  `shouldBe` "/a/b"
+                dropTrailingSlash "/a/b/" `shouldBe` "/a/b"
+
 
         context "parent" $ do
             let parentD = parent . adir

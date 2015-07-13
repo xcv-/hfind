@@ -11,6 +11,8 @@ import Prelude hiding (filter)
 
 import Data.Bifunctor
 
+import qualified Data.Text as T
+
 import Pipes
 import qualified Pipes.Prelude as P
 
@@ -164,6 +166,17 @@ flatten =
     for cat $ \case
       FileP fp    -> yield (FileEntry fp)
       DirP dp mbs -> yield (DirEntry  dp) >> (mbs >-> flatten)
+
+
+asPaths :: Monad m => Pipe (NodeListEntry 'Resolved) PathListEntry m ()
+asPaths = P.map (bimap nodePath nodePath)
+
+asFiles :: Monad m => Pipe PathListEntry (Path Abs File) m ()
+asFiles = P.map (\case DirEntry  p -> asFilePath p
+                       FileEntry p -> asFilePath p)
+
+plainText :: Monad m => Pipe (Path Abs File) T.Text m ()
+plainText = P.map toText
 
 
 -- disambiguation
