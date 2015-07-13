@@ -1,99 +1,92 @@
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
 module System.Posix.Find.Ls where
 
-import Data.Function ((&))
-
-import Control.Applicative
 import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Catch
 
+import Data.List (sort)
+
+import qualified Data.Text          as T
+import qualified Data.Text.Encoding as T
+
 import Pipes
 import qualified Pipes.Prelude as P
 
-import Path
-
 import System.Directory
-import qualified System.FilePath as FP
 
-import qualified System.Posix.Files as Posix
-import qualified System.Posix.Types as Posix
+import qualified System.Posix.Types            as Posix
+import qualified System.Posix.Files.ByteString as Posix
 
 import System.Posix.Find.Types
-import System.Posix.Find.Combinators
+import System.Posix.Text.Path
 
 
-type NodeListEntry s = ListEntry (FSNode File s) (FSNode Dir s)
-
-
-readSymlink :: Link -> IO (Path Abs File)
-readSymlink (Link p) = do
-    dest <- Posix.readSymbolicLink (toFilePath p)
-
-    dest & FP.dropTrailingPathSeparator
-         & toAbsolute
-         & canonicalize
-         & liftA2 handleAll (const . throwM . FileNotFoundError) parseAbsFile
-  where
-    toAbsolute p'
-      | FP.isAbsolute p' = p'
-      | otherwise        = toFilePath (parent p) FP.</> p'
-
-    canonicalize = FP.joinPath . snd . shortcircuit (0, []) . FP.splitDirectories . FP.normalise
-
-    shortcircuit :: (Int, [String]) -> [String] -> (Int, [String])
-    shortcircuit = foldr $ \case ".." -> \(i, acc) -> (i+1, acc)
-                                 d    -> \(i, acc) -> if i == 0 then (0, d:acc) else (i-1, acc)
-
-
-discriminatePath :: [Posix.FileID] -> Path Abs File -> IO (Posix.FileID, NodeListEntry 'WithLinks)
-discriminatePath = go
+discriminatePath :: Bool
+                 -> [Posix.FileID]
+                 -> Path Abs File
+                 -> IO ([Posix.FileID], NodeListEntry 'WithLinks)
+discriminatePath followSymLinks = go
   where
     go visited path = do
-      let fpath = toFilePath path
+      let bpath = toByteString path
+          tpath = toText path
 
-      stat <- Posix.getSymbolicLinkStatus fpath
-                `catchAll` \_ -> throwM (FileNotFoundError fpath)
+      stat <- Posix.getSymbolicLinkStatus bpath
+                `catchAll` \_ -> throwM (FileNotFoundError tpath)
 
       let inode = Posix.fileID stat
 
-      if Posix.isSymbolicLink stat
+      if Posix.isSymbolicLink stat && followSymLinks
         then do
+          (visited', target) <- do
+              when (inode `elem` visited) $ do
+                  throwM (FSCycleError tpath)
+
+              tdest <- T.decodeUtf8 <$> Posix.readSymbolicLink bpath
+
+              case canonicalizeBeside path tdest of
+                  Right p' -> go (inode:visited) p'
+                  Left _   -> throwM (FileNotFoundError tdest)
+
           let link = Link path
 
-          (inode', target) <- do
-              when (inode `elem` visited) $ do
-                  throwM (FSCycleError link)
-
-              go (inode:visited) =<< readSymlink link
-
           case target of
-              DirEntry  dir  -> return (inode', DirEntry  (SymLink stat link dir))
-              FileEntry file -> return (inode', FileEntry (SymLink stat link file))
+              FileEntry file -> retF visited' (SymLink stat link file)
+              DirEntry  dir  -> retD visited' (SymLink stat link dir)
         else do
+          let visited' = inode:visited
+
           if Posix.isDirectory stat
-            then return (inode, DirEntry  (DirNode  stat (asDirPath  path)))
-            else return (inode, FileEntry (FileNode stat (asFilePath path)))
+            then retD visited' (DirNode  stat (asDirPath  path))
+            else retF visited' (FileNode stat (asFilePath path))
+
+    retF visited' n = return (visited', FileEntry n)
+    retD visited' n = return (visited', DirEntry  n)
 
 
-lsR :: (MonadIO m, MonadCatch m) => Path Abs File -> IO (LsL m)
-lsR = go []
+ls :: (MonadIO m, MonadCatch m) => Bool -> Path Abs File -> IO (LsL m)
+ls followSymLinks = go []
   where
     go visited root = do
-        discriminatePath visited root <&> \case
-            (_, FileEntry file) ->
+        (visited', entry) <- discriminatePath followSymLinks visited root
+
+        return $
+          case entry of
+            FileEntry file ->
                 FileP file
 
-            (inode, DirEntry dir) ->
+            DirEntry dir ->
                 DirP dir $ do
-                  contents <- liftIO $ getDirectoryContents (toFilePath root)
+                  contents <- liftIO $ getDirectoryContents (toString root)
 
-                  each (filter valid contents)
-                    >-> P.mapM (parseRelFile . FP.dropTrailingPathSeparator)
+                  each (sort $ filter valid contents)
+                    >-> P.map  (unsafeRelativeFile . dropTrailingSlash . T.pack)
                     >-> P.map  (asDirPath root </>)
-                    >-> P.mapM (liftIO . handling . go (inode:visited))
+                    >-> P.mapM (liftIO . handling . go visited')
 
     valid :: FilePath -> Bool
     valid ".." = False

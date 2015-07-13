@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE Rank2Types #-}
@@ -7,6 +9,9 @@
 module System.Posix.Find.Types where
 
 import Data.Bifunctor
+import Data.Bifoldable
+import Data.Bitraversable
+
 import Data.Typeable (Typeable)
 
 import Control.Monad.Catch (Exception)
@@ -14,13 +19,12 @@ import Control.Monad.Catch (Exception)
 import Pipes
 import qualified Pipes.Prelude as P
 
-import Path
-import qualified Path.Internal as PathInternal
-
-import qualified System.FilePath as FP
-
 import System.Posix.Files (FileStatus)
 
+import System.Posix.Text.Path
+
+
+-- filesystem tree
 
 data Ls m fp dp
   = FileP fp
@@ -29,6 +33,11 @@ data Ls m fp dp
 instance Monad m => Bifunctor (Ls m) where
     bimap ffp _   (FileP fp)    = FileP (ffp fp)
     bimap ffp fdp (DirP dp mbs) = DirP (fdp dp) (mbs >-> P.map (bimap ffp fdp))
+
+type LsN  m l = Ls m (FSNode File l) (FSNode Dir l)
+type LsL  m   = LsN m 'WithLinks
+type LsN' m   = LsN m 'WithoutLinks
+type LsR  m   = LsN m 'Resolved
 
 
 data FSNodeType = Raw | WithLinks | WithoutLinks | Resolved
@@ -44,19 +53,20 @@ type family HasErrors (s :: FSNodeType) :: Bool where
     HasErrors s         = 'True
 
 
-newtype Link = Link { getLinkPath :: Path Abs File }
-    deriving (Eq)
-
-instance Show Link where
-    show (Link p) = show p
-
-
 data FSNode t (s :: FSNodeType) where
     FileNode ::                        FileStatus -> Path Abs File      -> FSNode File s
     DirNode  ::                        FileStatus -> Path Abs Dir       -> FSNode Dir  s
     SymLink  :: HasLinks  s ~ 'True => FileStatus -> Link -> FSNode t s -> FSNode t    s
-    Missing  :: HasErrors s ~ 'True => FilePath                         -> FSNode t    s
-    FSCycle  :: HasErrors s ~ 'True => Link                             -> FSNode t    s
+    Missing  :: HasErrors s ~ 'True => RawPath                          -> FSNode t    s
+    FSCycle  :: HasErrors s ~ 'True => RawPath                          -> FSNode t    s
+
+instance Show (FSNode t l) where
+    show (FileNode _ p)  = "File      " ++ show p
+    show (DirNode _ p)   = "Directory " ++ show p
+    show (SymLink _ s p) = "SymLink   " ++ show s ++ " -> " ++ show p
+    show (Missing p)     = "Missing   " ++ show p
+    show (FSCycle p)     = "Cycle     " ++ show p
+
 
 nodePath :: (HasErrors s ~ 'False, HasLinks s ~ 'False)
          => FSNode t s -> Path Abs t
@@ -66,52 +76,46 @@ nodePath _ =
     error "System.Posix.Find.Types.nodePath: the impossible just happened!"
 
 
-instance Show (FSNode t l) where
-    show (FileNode _ p)  = "File      " ++ show p
-    show (DirNode _ p)   = "Directory " ++ show p
-    show (SymLink _ s p) = "SymLink   " ++ show s ++ " -> " ++ show p
-    show (Missing p)     = "Missing   " ++ show p
-    show (FSCycle l)     = "Cycle     " ++ show l
+-- listing
 
 data ListEntry fp dp = FileEntry fp | DirEntry dp
+
+type PathListEntry s = ListEntry (Path Abs File) (Path Abs Dir)
+type NodeListEntry s = ListEntry (FSNode File s) (FSNode Dir s)
 
 instance (Show fp, Show dp) => Show (ListEntry fp dp) where
     show (DirEntry  p) = show p
     show (FileEntry p) = show p
 
+instance Bifunctor ListEntry where
+    bimap f _ (FileEntry fp) = FileEntry (f fp)
+    bimap _ g (DirEntry dp)  = DirEntry  (g dp)
 
-class IsPathType t where
-    asFilePath :: Path Abs t -> Path Abs File
-    asDirPath  :: Path Abs t -> Path Abs Dir
+instance Bifoldable ListEntry where
+    bifoldr f _ acc (FileEntry fp) = f fp acc
+    bifoldr _ g acc (DirEntry  dp) = g dp acc
 
-instance IsPathType File where
-    asFilePath = id
-    asDirPath  = PathInternal.Path . FP.addTrailingPathSeparator . toFilePath
-
-instance IsPathType Dir where
-    asFilePath = PathInternal.Path . FP.dropTrailingPathSeparator . toFilePath
-    asDirPath = id
-
-
-type LsN  m l = Ls m (FSNode File l) (FSNode Dir l)
-type LsL  m   = LsN m 'WithLinks
-type LsN' m   = LsN m 'WithoutLinks
-type LsR  m   = LsN m 'Resolved
+instance Bitraversable ListEntry where
+    bitraverse f _ (FileEntry fp) = FileEntry <$> f fp
+    bitraverse _ g (DirEntry  dp) = DirEntry  <$> g dp
 
 
-newtype FSCycleError = FSCycleError Link
+
+-- errors
+
+newtype FSCycleError = FSCycleError RawPath
   deriving (Typeable)
 
 instance Show FSCycleError where
-    show (FSCycleError (Link p)) = "File system cycle at " ++ show p
+    show (FSCycleError p) = "File system cycle at " ++ show p
 
 instance Exception FSCycleError
 
 
-newtype FileNotFoundError = FileNotFoundError FilePath
+newtype FileNotFoundError = FileNotFoundError RawPath
   deriving (Typeable)
 
 instance Show FileNotFoundError where
-    show (FileNotFoundError p) = "File not found: " ++ p
+    show (FileNotFoundError p) = "File not found: " ++ show p
 
 instance Exception FileNotFoundError

@@ -1,5 +1,10 @@
 module System.Posix.Find.Main (main) where
 
+import System.Posix.Text.Path
+import System.Posix.Find.Types
+import System.Posix.Find.Combinators
+import System.Posix.Find.Ls
+
 main :: IO ()
 main = do
 

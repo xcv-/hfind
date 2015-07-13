@@ -1,3 +1,4 @@
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE LambdaCase #-}
@@ -13,6 +14,7 @@ import Data.Bifunctor
 import Pipes
 import qualified Pipes.Prelude as P
 
+import System.Posix.Text.Path
 import System.Posix.Find.Types
 
 import System.IO (hPutStrLn, stderr)
@@ -73,11 +75,11 @@ censorM :: Monad m => (Ls m fp dp -> m Bool) -> Transform fp dp m
 censorM p = recurse (P.filterM p)
 
 
-forbid :: Monad m => (Ls m fp dp -> Bool) -> Transform fp dp m
-forbid p = forbidM (return . p)
+skip :: Monad m => (Ls m fp dp -> Bool) -> Transform fp dp m
+skip p = skipM (return . p)
 
-forbidM :: Monad m => (Ls m fp dp -> m Bool) -> Transform fp dp m
-forbidM p = censorM (fmap not . p)
+skipM :: Monad m => (Ls m fp dp -> m Bool) -> Transform fp dp m
+skipM p = censorM (fmap not . p)
 
 
 censorP :: Monad m => (Either fp dp -> Bool) -> Transform fp dp m
@@ -104,55 +106,57 @@ pruneDirs :: Monad m => (dp -> Bool) -> Transform fp dp m
 pruneDirs p = pruneDirsM (return . p)
 
 pruneDirsM :: Monad m => (dp -> m Bool) -> Transform fp dp m
-pruneDirsM p = forbidM p'
+pruneDirsM p = skipM p'
   where
     p' (FileP _)   = return False
     p' (DirP dp _) = p dp
 
 
-class HasLinks s ~ 'True => Follow s where
-    type RemovedLinks s :: FSNodeType
-    follow :: FSNode t s -> FSNode t (RemovedLinks s)
-
-instance Follow 'Raw where
-    type RemovedLinks 'Raw = 'Resolved
-
-    follow (FileNode stat p) = FileNode stat p
-    follow (DirNode  stat p) = DirNode  stat p
-    follow _ =
-        error "System.Posix.Find.Combinators.follow: the impossible just happened!"
-
-instance Follow 'WithLinks where
-    type RemovedLinks 'WithLinks = 'WithoutLinks
-
-    follow (FileNode stat p) = FileNode stat p
-    follow (DirNode  stat p) = DirNode  stat p
-    follow (SymLink _ _ p)   = follow p
-    follow (Missing p)       = Missing p
-    follow (FSCycle l)       = FSCycle l
-
+follow :: forall s s' t. (HasErrors s ~ HasErrors s') => FSNode t s -> FSNode t s'
+follow (FileNode stat p) = FileNode stat p
+follow (DirNode  stat p) = DirNode  stat p
+follow (SymLink _ l n)   =
+    case follow n :: FSNode t s' of
+        FileNode stat _ -> FileNode stat (asFilePath (getLinkPath l))
+        DirNode stat _  -> DirNode stat  (asDirPath  (getLinkPath l))
+        Missing p       -> Missing p
+        FSCycle p       -> FSCycle p
+        _ -> error "System.Posix.Find.Combinators.follow: the impossible happened!"
+follow (Missing p)       = Missing p
+follow (FSCycle l)       = FSCycle l
 
 followLinks :: Monad m => Pipe (LsL m) (LsN' m) m ()
 followLinks = P.map (bimap follow follow)
 
 
-reportErrors :: forall m. MonadIO m => Pipe (LsN' m) (LsR m) m ()
-reportErrors = fixP $ \go ->
+type NodeFilter m s s' = forall t. FSNode t s -> Producer' (FSNode t s') m ()
+
+report :: (MonadIO m, HasLinks s ~ HasLinks s') => NodeFilter m s s'
+report = \case
+    FileNode stat p  -> yield (FileNode stat p)
+    DirNode stat p   -> yield (DirNode stat p)
+    SymLink stat l p -> for (report p) (yield . SymLink stat l)
+    Missing p        -> liftIO $ hPutStrLn stderr ("*** File not found " ++ show p)
+    FSCycle l        -> liftIO $ hPutStrLn stderr ("*** File system cycle at " ++ show l)
+
+silence :: (Monad m, HasLinks s ~ HasLinks s') => NodeFilter m s s'
+silence = \case
+    FileNode stat p  -> yield (FileNode stat p)
+    DirNode stat p   -> yield (DirNode stat p)
+    SymLink stat l p -> for (silence p) (yield . SymLink stat l)
+    Missing _        -> return ()
+    FSCycle _        -> return ()
+
+onError :: (Monad m, HasLinks s ~ HasLinks s')
+        => NodeFilter m s s' -> Pipe (LsN m s) (LsN m s') m ()
+onError erase = fixP $ \go ->
     for cat $ \case
-      FileP fp    -> reportErrorsN fp >-> P.map FileP
-      DirP dp mbs -> reportErrorsN dp >-> P.map (\dp' -> DirP dp' (go mbs))
-  where
-    reportErrorsN :: FSNode t 'WithoutLinks -> Producer' (FSNode t 'Resolved) m ()
-    reportErrorsN = \case
-        FileNode stat p -> yield (FileNode stat p)
-        DirNode stat p  -> yield (DirNode stat p)
-        Missing p       -> liftIO $ hPutStrLn stderr ("*** File not found " ++ show p)
-        FSCycle l       -> liftIO $ hPutStrLn stderr ("*** File system cycle at " ++ show l)
-        _ -> error "System.Posix.Find.Combinators.reportErrors: the impossible just happened!"
+      FileP fp    -> erase fp >-> P.map FileP
+      DirP dp mbs -> erase dp >-> P.map (\dp' -> DirP dp' (go mbs))
 
 
 clean :: MonadIO m => Pipe (LsL m) (LsR m) m ()
-clean = followLinks >-> reportErrors
+clean = followLinks >-> onError report
 
 
 flatten :: Monad m => Pipe (Ls m fp dp) (ListEntry fp dp) m ()
@@ -160,3 +164,21 @@ flatten =
     for cat $ \case
       FileP fp    -> yield (FileEntry fp)
       DirP dp mbs -> yield (DirEntry  dp) >> (mbs >-> flatten)
+
+
+-- disambiguation
+
+is :: Pipe a a m () -> Pipe a a m ()
+is = id
+
+raw :: Monad m => Pipe (LsN m 'Raw) (LsN m 'Raw) m ()
+raw = cat
+
+withLinks :: Monad m => Pipe (LsN m 'WithLinks) (LsN m 'WithLinks) m ()
+withLinks = cat
+
+withoutLinks :: Monad m => Pipe (LsN m 'WithoutLinks) (LsN m 'WithoutLinks) m ()
+withoutLinks = cat
+
+resolved :: Monad m => Pipe (LsN m 'Resolved) (LsN m 'Resolved) m ()
+resolved = cat
