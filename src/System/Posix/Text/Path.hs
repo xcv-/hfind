@@ -30,6 +30,7 @@ type RawPath = T.Text
 
 type role Path nominal nominal
 newtype Path (t :: PathType) (d :: PathDest) = Path T.Text
+    deriving (Eq)
 
 toText :: Path b t -> T.Text
 toText (Path p) = p
@@ -70,17 +71,18 @@ instance CoerciblePath 'Dir 'Dir where
     coercePath = id
 
 
-dropTrailingSlash :: RawPath -> RawPath
+dropTrailingSlash :: RawPath -> Maybe RawPath
 dropTrailingSlash p
-  | T.null p        = p
-  | T.last p == '/' = T.init p
-  | otherwise       = p
+  | T.null p        = Just p
+  | p == "/"        = Nothing -- WARNING: removing the slash here could cause a lot of pain
+  | T.last p == '/' = Just (T.init p)
+  | otherwise       = Just p
 
-addTrailingSlash :: RawPath -> RawPath
+addTrailingSlash :: RawPath -> Maybe RawPath
 addTrailingSlash p
-  | T.null p        = p -- WARNING: adding a slash here could cause a lot of pain
-  | T.last p == '/' = p
-  | otherwise       = T.snoc p '/'
+  | T.null p        = Nothing -- WARNING: adding a slash here could cause a lot of pain
+  | T.last p == '/' = Just p
+  | otherwise       = Just (T.snoc p '/')
 
 
 asFilePath :: CoerciblePath t File => Path Abs t -> Path Abs File
@@ -94,40 +96,39 @@ asDirPath = coercePath
 Path p </> Path p' = Path (p <> p')
 {-# INLINE (</>) #-}
 
-unsafeRelativeFile :: RawPath -> Path Rel File
-unsafeRelativeFile = Path
-{-# INLINE unsafeRelativeFile #-}
+unsafeRelFile :: RawPath -> Path Rel File
+unsafeRelFile = Path
 
-unsafeRelativeDir :: RawPath -> Path Rel Dir
-unsafeRelativeDir = Path
-{-# INLINE unsafeRelativeDir #-}
+unsafeRelDir :: RawPath -> Path Rel Dir
+unsafeRelDir = Path
 
-unsafeAbsoluteFile :: RawPath -> Path Abs File
-unsafeAbsoluteFile = Path
-{-# INLINE unsafeAbsoluteFile #-}
+unsafeAbsFile :: RawPath -> Path Abs File
+unsafeAbsFile = Path
 
-unsafeAbsoluteDir :: RawPath -> Path Abs Dir
-unsafeAbsoluteDir = Path
-{-# INLINE unsafeAbsoluteDir #-}
+unsafeAbsDir :: RawPath -> Path Abs Dir
+unsafeAbsDir = Path
 
 
-parent :: Path Abs t -> Maybe (Path Abs Dir)
+parent :: CoerciblePath t File => Path Abs t -> Maybe (Path Abs Dir)
 parent (Path "")  = Nothing
 parent (Path "/") = Nothing
-parent (Path p)   = Just $ unsafeAbsoluteDir (T.dropWhileEnd (/='/') p)
+parent p          = Just $ unsafeAbsDir (T.dropWhileEnd (/='/') fp)
+  where
+    (Path fp) = asFilePath p
 
 
 isAbsolute :: RawPath -> Bool
-isAbsolute p = not (T.null p) && T.head p == '/'
+isAbsolute p = T.null p || T.head p == '/'
 
 normalize :: RawPath -> Maybe RawPath
 normalize p = p
     & T.splitOn "/"
     & filter (not . T.null)  -- remove //
-    & filter (== ".")        -- remove /./
+    & filter (/= ".")        -- remove /./
     & shortCircuit (0, [])   -- remove /../
     & \case
         (0, p')
+          | T.null p     -> Nothing
           | isAbsolute p -> Just $ T.intercalate "/" ("":p') -- append root
           | otherwise    -> Just $ T.intercalate "/" p'
         _ -> Nothing
@@ -139,13 +140,13 @@ normalize p = p
 
 canonicalizeUnder :: Path Abs Dir -> RawPath -> Either RawPath (Path Abs File)
 canonicalizeUnder parentPath p =
-    maybe (Left p) Right $ Path <$> normalize (absolute (dropTrailingSlash p))
+    maybe (Left p) Right $ Path <$> normalize (absolute p)
   where
     absolute d
-      | T.null d     = T.singleton '.'
       | isAbsolute d = d
-      | otherwise    = toText (parentPath </> unsafeRelativeFile p)
+      | otherwise    = toText (parentPath </> unsafeRelFile p)
 
-canonicalizeBeside :: Path Abs t -> RawPath -> Either RawPath (Path Abs File)
+canonicalizeBeside :: CoerciblePath t File
+                   => Path Abs t -> RawPath -> Either RawPath (Path Abs File)
 canonicalizeBeside sibling p =
     flip canonicalizeUnder p =<< maybe (Left p) Right (parent sibling)

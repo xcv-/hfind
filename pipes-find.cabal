@@ -58,3 +58,12 @@ executable hfind
                        pipes-find
   default-language:    Haskell2010
   ghc-options:         -Wall -fwarn-incomplete-uni-patterns
+
+test-suite spec
+  type:                exitcode-stdio-1.0
+
+  hs-source-dirs:      test
+
+  main-is:             Spec.hs
+
+  build-depends:       base, hspec, pipes-find

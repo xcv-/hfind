@@ -8,6 +8,7 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Catch
 
+import Data.Maybe
 import Data.List (sort)
 
 import qualified Data.Text          as T
@@ -84,13 +85,14 @@ ls followSymLinks = go []
                   contents <- liftIO $ getDirectoryContents (toString root)
 
                   each (sort $ filter valid contents)
-                    >-> P.map  (unsafeRelativeFile . dropTrailingSlash . T.pack)
+                    >-> P.map  (unsafeRelFile . fromJust . dropTrailingSlash . T.pack)
                     >-> P.map  (asDirPath root </>)
                     >-> P.mapM (liftIO . handling . go visited')
 
     valid :: FilePath -> Bool
-    valid ".." = False
+    valid ""   = False
     valid "."  = False
+    valid ".." = False
     valid _    = True
 
     handling :: MonadCatch n => n (LsL m) -> n (LsL m)
