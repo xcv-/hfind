@@ -38,6 +38,7 @@ bimapM mffp mfdp (DirP dp mbs) = do
 
 
 type Transform fp dp m = Pipe (Ls m fp dp) (Ls m fp dp) m ()
+type TransformP  m     = Pipe (LsP m)      (LsP m)      m ()
 type TransformN  m s   = Pipe (LsN  m s)   (LsN  m s)   m ()
 type TransformL  m s   = Pipe (LsL  m)     (LsL  m)     m ()
 type TransformN' m s   = Pipe (LsN' m)     (LsN' m)     m ()
@@ -71,47 +72,68 @@ recurse f = fixP (\go -> f >-> mapChildren go)
 
 
 censor :: Monad m => (Ls m fp dp -> Bool) -> Transform fp dp m
-censor p = censorM (return . p)
+censor p = recurse (P.filter p)
 
 censorM :: Monad m => (Ls m fp dp -> m Bool) -> Transform fp dp m
 censorM p = recurse (P.filterM p)
 
 
+censorF2 :: Monad m => (fp -> Bool) -> (dp -> Bool) -> Transform fp dp m
+censorF2 p q = censor p'
+  where
+    p' (FileP fp)  = p fp
+    p' (DirP dp _) = q dp
+
+censorF2M :: Monad m => (fp -> m Bool) -> (dp -> m Bool) -> Transform fp dp m
+censorF2M p q = censorM p'
+  where
+    p' (FileP fp)  = p fp
+    p' (DirP dp _) = q dp
+
+
+censorP :: Monad m => (forall t. Path Abs t -> Bool) -> TransformP m
+censorP p = censorF2 p p
+
+censorPM :: Monad m => (forall t. Path Abs t -> m Bool) -> TransformP m
+censorPM p = censorF2M p p
+
+censorN :: Monad m => (forall t. FSNode t s -> Bool) -> TransformN m s
+censorN p = censorF2 p p
+
+censorNM :: Monad m => (forall t. FSNode t s -> m Bool) -> TransformN m s
+censorNM p = censorF2M p p
+
+
 skip :: Monad m => (Ls m fp dp -> Bool) -> Transform fp dp m
-skip p = skipM (return . p)
+skip p = censor (not . p)
 
 skipM :: Monad m => (Ls m fp dp -> m Bool) -> Transform fp dp m
 skipM p = censorM (fmap not . p)
 
+skipF2 :: Monad m => (fp -> Bool) -> (dp -> Bool) -> Transform fp dp m
+skipF2 p q = censorF2 (not . p) (not . q)
 
-censorP :: Monad m => (Either fp dp -> Bool) -> Transform fp dp m
-censorP p = censorPM (return . p)
+skipF2M :: Monad m => (fp -> m Bool) -> (dp -> m Bool) -> Transform fp dp m
+skipF2M p q = censorF2M (fmap not . p) (fmap not . q)
 
-censorPM :: Monad m => (Either fp dp -> m Bool) -> Transform fp dp m
-censorPM p = censorM p'
-  where
-    p' (FileP fp)  = p (Left fp)
-    p' (DirP dp _) = p (Right dp)
+skipP :: Monad m => (forall t. Path Abs t -> Bool) -> TransformP m
+skipP p = skipF2 p p
 
+skipPM :: Monad m => (forall t. Path Abs t -> m Bool) -> TransformP m
+skipPM p = skipF2M p p
 
-censorN :: Monad m => (forall t. FSNode t s -> Bool) -> TransformN m s
-censorN p = censorNM (return . p)
+skipN :: Monad m => (forall t. FSNode t s -> Bool) -> TransformN m s
+skipN p = skipF2 p p
 
-censorNM :: Monad m => (forall t. FSNode t s -> m Bool) -> TransformN m s
-censorNM p = censorM p'
-  where
-    p' (FileP fp)  = p fp
-    p' (DirP dp _) = p dp
+skipNM :: Monad m => (forall t. FSNode t s -> m Bool) -> TransformN m s
+skipNM p = skipF2M p p
 
 
 pruneDirs :: Monad m => (dp -> Bool) -> Transform fp dp m
-pruneDirs p = pruneDirsM (return . p)
+pruneDirs p = skipF2 (const False) p
 
 pruneDirsM :: Monad m => (dp -> m Bool) -> Transform fp dp m
-pruneDirsM p = skipM p'
-  where
-    p' (FileP _)   = return False
-    p' (DirP dp _) = p dp
+pruneDirsM p = skipF2M (const $ return False) p
 
 
 follow :: forall s s' t. (HasErrors s ~ HasErrors s') => FSNode t s -> FSNode t s'

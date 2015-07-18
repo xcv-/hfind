@@ -66,4 +66,6 @@ test-suite spec
 
   main-is:             Spec.hs
 
-  build-depends:       base, deepseq, hspec, pipes-find
+  build-depends:       base, deepseq, pipes, text, mtl, bifunctors,
+                       hspec, QuickCheck, quickcheck-instances,
+                       pipes-find

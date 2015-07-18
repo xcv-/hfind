@@ -34,6 +34,7 @@ instance Monad m => Bifunctor (Ls m) where
     bimap ffp _   (FileP fp)    = FileP (ffp fp)
     bimap ffp fdp (DirP dp mbs) = DirP (fdp dp) (mbs >-> P.map (bimap ffp fdp))
 
+type LsP  m   = Ls m (Path Abs File) (Path Abs Dir)
 type LsN  m l = Ls m (FSNode File l) (FSNode Dir l)
 type LsL  m   = LsN m 'WithLinks
 type LsN' m   = LsN m 'WithoutLinks

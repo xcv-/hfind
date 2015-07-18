@@ -32,7 +32,7 @@ type RawPath = T.Text
 
 type role Path nominal nominal
 newtype Path (t :: PathType) (d :: PathDest) = Path T.Text
-    deriving (Eq)
+    deriving (Eq, Ord)
 
 toText :: Path b t -> T.Text
 toText (Path p) = p
