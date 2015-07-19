@@ -1,31 +1,98 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE TypeFamilies #-}
 module System.Posix.Find.Main (main) where
 
-import System.Posix.Text.Path
-import System.Posix.Find.Types
-import System.Posix.Find.Combinators
-import System.Posix.Find.Ls
+import Control.Monad.Trans.Except
+import Control.Monad.Except
+
+import qualified Data.Text as T
+
+import System.Environment
+import System.Exit
+
+import qualified Pipes.Prelude as P
+
+import System.Posix.Find
+import System.Posix.Find.Predicate
+
+
+type EntryTransform m = Pipe (NodeListEntry 'Resolved) (NodeListEntry 'Resolved) m ()
+
+
+parsePathArg :: String -> ExceptT String IO (Path Abs Dir)
+parsePathArg path = do
+    ecanonicalized <- liftIO $ canonicalizeFromHere (T.pack path)
+
+    case ecanonicalized of
+        Right p -> return (asDirPath p)
+        Left p  -> throwError ("Invalid path: " ++ T.unpack p)
+
+
+parseActions :: Monad m
+             => [String]
+             -> ExceptT String IO (TransformR m, EntryTransform m)
+parseActions ("-if":expr:opts) = do
+    predicate <- parseFilterPredicate expr
+    (lsP, eP) <- parseActions opts
+
+    return ( lsP
+           , P.filter (evalEntryPredicate predicate) >-> eP )
+
+parseActions ("-prune":expr:opts) = do
+    predicate <- parsePrunePredicate expr
+    (lsP, eP) <- parseActions opts
+
+    return ( pruneDirs (evalDirPredicate predicate) >-> lsP
+           , eP )
+
+parseActions (opt:_) = throwError ("Invalid action: " ++ opt)
+parseActions []      = return (cat, cat)
+
+
+parseArgs :: Monad m
+          => [String]
+          -> ExceptT String IO (Path Abs Dir, TransformR m, EntryTransform m)
+parseArgs [] = throwError "Expected starting path"
+parseArgs (pathArg:opts) = do
+    path      <- parsePathArg pathArg
+    (lsP, eP) <- parseActions opts
+
+    return (path, lsP, eP)
+
+
 
 main :: IO ()
 main = do
+    prog <- getProgName
 
-    return ()
+    (links, args) <- getArgs <&> \case
+                         "-L":args' -> (True,  args')
+                         args'      -> (False, args')
 
-    --ls <- return . bimap nodePath nodePath . filterFilesN missing <-< yield (followLinks ls)
+    (path, lsP, eP) <- runExceptT (parseArgs args) >>= \case
+                           Right r  -> return r
+                           Left err -> die $ unlines
+                              [ "Error parsing arguments: " ++ err
+                              , ""
+                              , "usage: " ++ prog ++ " <path> [actions...]"
+                              , "  actions:"
+                              , "    -if expr:    allow only entries matching expr"
+                              , "    -prune expr: filter subtrees matching expr"
+                              ]
 
-    --P.fold (\() _ -> ()) () id (sourceLs ls)
-{-
-    ls <- lsR =<< parseAbsFile =<< getHomeDirectory
+    let listing
+         | links     = (ls FollowSymLinks   path >>= yield) >-> followLinks
+         | otherwise = (ls SymLinksAreFiles path >>= yield)
 
-    let missing (Missing _) = return True
-        missing _           = return False
-
-    let hidden d = return $ head (toFilePath $ dirname d) == '.'
-
-    runEffect $ do
-        yield (followLinks ls)
-          >-> filterFilesN missing
-          >-> P.map (bimap nodePath nodePath)
-          >-> pruneDirs hidden
-          >-> enumerateLs
-          >-> P.print
-          -}
+    runEffect $
+        listing
+            >-> onError report
+            >-> lsP
+            >-> flatten
+            >-> eP
+            >-> asPaths
+            >-> asFiles
+            >-> stringPaths
+            >-> P.stdoutLn

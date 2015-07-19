@@ -54,7 +54,7 @@ type family HasErrors (s :: FSNodeType) :: Bool where
     HasErrors s         = 'True
 
 
-data FSNode :: PathDest -> FSNodeType -> * where
+data FSNode :: PathType -> FSNodeType -> * where
     FileNode ::                        FileStatus -> Path Abs File      -> FSNode File s
     DirNode  ::                        FileStatus -> Path Abs Dir       -> FSNode Dir  s
     SymLink  :: HasLinks  s ~ 'True => FileStatus -> Link -> FSNode t s -> FSNode t    s

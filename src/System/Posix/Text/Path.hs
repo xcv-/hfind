@@ -19,8 +19,8 @@ import qualified Data.ByteString as B
 import qualified System.Directory as D
 
 
-data PathType = Rel  | Abs
-data PathDest = File | Dir
+data PathMode = Rel  | Abs
+data PathType = File | Dir
 
 type Rel = 'Rel
 type Abs = 'Abs
@@ -31,7 +31,7 @@ type Dir  = 'Dir
 type RawPath = T.Text
 
 type role Path nominal nominal
-newtype Path (t :: PathType) (d :: PathDest) = Path T.Text
+newtype Path (t :: PathMode) (d :: PathType) = Path T.Text
     deriving (Eq, Ord)
 
 toText :: Path b t -> T.Text
@@ -57,7 +57,17 @@ instance Show Link where
     show (Link p) = show p
 
 
-class CoerciblePath t t' where
+class IsPathType (t :: PathType) where
+    getPathType :: p t -> PathType
+
+instance IsPathType 'File where
+    getPathType _ = File
+
+instance IsPathType 'Dir where
+    getPathType _ = Dir
+
+
+class (IsPathType t, IsPathType t') => CoerciblePath t t' where
     coercePath :: Path Abs t -> Path Abs t'
 
 instance CoerciblePath 'File 'Dir where

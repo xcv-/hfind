@@ -1,18 +1,16 @@
 pipes-find
 ==========
 
-A primitive find already works!
+First working executable already available!
 
 To run it,
 ```
 cabal sandbox init
 cabal install --dependencies-only
 cabal configure
-cabal repl
-> :set -XOverloadedStrings
-> find  $ unsafeAbsDir "/absolute/directory/with/trailing/slash/"
-> findL $ unsafeAbsDir "/absolute/directory/with/trailing/slash/"
+cabal build
+dist/build/hfind/hfind .
+dist/build/hfind/hfind -L .
 ```
 
-The difference between `find` and `findL` is that the former does not follow
-any symlinks.
+/Note/: -L has the same meaning as in the regular `find` command (follow symlinks)

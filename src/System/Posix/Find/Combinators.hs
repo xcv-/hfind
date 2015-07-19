@@ -40,9 +40,9 @@ bimapM mffp mfdp (DirP dp mbs) = do
 type Transform fp dp m = Pipe (Ls m fp dp) (Ls m fp dp) m ()
 type TransformP  m     = Pipe (LsP m)      (LsP m)      m ()
 type TransformN  m s   = Pipe (LsN  m s)   (LsN  m s)   m ()
-type TransformL  m s   = Pipe (LsL  m)     (LsL  m)     m ()
-type TransformN' m s   = Pipe (LsN' m)     (LsN' m)     m ()
-type TransformR  m s   = Pipe (LsR  m)     (LsR  m)     m ()
+type TransformL  m     = Pipe (LsL  m)     (LsL  m)     m ()
+type TransformN' m     = Pipe (LsN' m)     (LsN' m)     m ()
+type TransformR  m     = Pipe (LsR  m)     (LsR  m)     m ()
 
 
 mapChildren :: Monad m
@@ -91,16 +91,16 @@ censorF2M p q = censorM p'
     p' (DirP dp _) = q dp
 
 
-censorP :: Monad m => (forall t. Path Abs t -> Bool) -> TransformP m
+censorP :: Monad m => (forall t. IsPathType t => Path Abs t -> Bool) -> TransformP m
 censorP p = censorF2 p p
 
-censorPM :: Monad m => (forall t. Path Abs t -> m Bool) -> TransformP m
+censorPM :: Monad m => (forall t. IsPathType t => Path Abs t -> m Bool) -> TransformP m
 censorPM p = censorF2M p p
 
-censorN :: Monad m => (forall t. FSNode t s -> Bool) -> TransformN m s
+censorN :: Monad m => (forall t. IsPathType t => FSNode t s -> Bool) -> TransformN m s
 censorN p = censorF2 p p
 
-censorNM :: Monad m => (forall t. FSNode t s -> m Bool) -> TransformN m s
+censorNM :: Monad m => (forall t. IsPathType t => FSNode t s -> m Bool) -> TransformN m s
 censorNM p = censorF2M p p
 
 
@@ -116,16 +116,16 @@ skipF2 p q = censorF2 (not . p) (not . q)
 skipF2M :: Monad m => (fp -> m Bool) -> (dp -> m Bool) -> Transform fp dp m
 skipF2M p q = censorF2M (fmap not . p) (fmap not . q)
 
-skipP :: Monad m => (forall t. Path Abs t -> Bool) -> TransformP m
+skipP :: Monad m => (forall t. IsPathType t => Path Abs t -> Bool) -> TransformP m
 skipP p = skipF2 p p
 
-skipPM :: Monad m => (forall t. Path Abs t -> m Bool) -> TransformP m
+skipPM :: Monad m => (forall t. IsPathType t => Path Abs t -> m Bool) -> TransformP m
 skipPM p = skipF2M p p
 
-skipN :: Monad m => (forall t. FSNode t s -> Bool) -> TransformN m s
+skipN :: Monad m => (forall t. IsPathType t => FSNode t s -> Bool) -> TransformN m s
 skipN p = skipF2 p p
 
-skipNM :: Monad m => (forall t. FSNode t s -> m Bool) -> TransformN m s
+skipNM :: Monad m => (forall t. IsPathType t => FSNode t s -> m Bool) -> TransformN m s
 skipNM p = skipF2M p p
 
 
@@ -199,6 +199,9 @@ asFiles = P.map (\case DirEntry  p -> asFilePath p
 
 plainText :: Monad m => Pipe (Path Abs File) T.Text m ()
 plainText = P.map toText
+
+stringPaths :: Monad m => Pipe (Path Abs File) String m ()
+stringPaths = P.map toString
 
 
 -- disambiguation
