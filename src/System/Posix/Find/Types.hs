@@ -24,6 +24,13 @@ import System.Posix.Files (FileStatus)
 import System.Posix.Text.Path
 
 
+-- too useful to put anywhere else
+
+(<&>) :: Functor f => f a -> (a -> b) -> f b
+(<&>) = flip (<$>)
+infixl 1 <&>
+
+
 -- filesystem tree
 
 data Ls m fp dp
@@ -99,7 +106,6 @@ instance Bifoldable ListEntry where
 instance Bitraversable ListEntry where
     bitraverse f _ (FileEntry fp) = FileEntry <$> f fp
     bitraverse _ g (DirEntry  dp) = DirEntry  <$> g dp
-
 
 
 -- errors

@@ -22,10 +22,6 @@ import System.Posix.Find.Types
 import System.IO (hPutStrLn, stderr)
 
 
-(<&>) :: Functor f => f a -> (a -> b) -> f b
-(<&>) = flip (<$>)
-
-
 bimapM :: Monad m
        => (fp -> m fp')
        -> (dp -> m dp')

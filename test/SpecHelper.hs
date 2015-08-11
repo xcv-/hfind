@@ -9,6 +9,11 @@ module SpecHelper
     , module System.Posix.Text.Path
     , module System.Posix.Find.Types
     , module System.Posix.Find.Combinators
+    , module System.Posix.Find.Lang.Builtins
+    , module System.Posix.Find.Lang.Eval
+    , module System.Posix.Find.Lang.Parser
+    , module System.Posix.Find.Lang.Predicate
+    , module System.Posix.Find.Lang.Types
     , shouldError
     ) where
 
@@ -37,6 +42,12 @@ import System.IO.Unsafe
 import System.Posix.Text.Path
 import System.Posix.Find.Types
 import System.Posix.Find.Combinators
+
+import System.Posix.Find.Lang.Builtins
+import System.Posix.Find.Lang.Eval
+import System.Posix.Find.Lang.Parser
+import System.Posix.Find.Lang.Predicate
+import System.Posix.Find.Lang.Types
 
 
 shouldError :: NFData a => a -> () -> Expectation

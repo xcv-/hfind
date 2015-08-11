@@ -9,6 +9,11 @@ import System.Posix.Find.Types as X
 import System.Posix.Find.Combinators as X
 import System.Posix.Find.Ls as X
 
+import System.Posix.Find.Lang.Eval      as X
+import System.Posix.Find.Lang.Types     as X
+import System.Posix.Find.Lang.Parser    as X
+import System.Posix.Find.Lang.Predicate as X
+
 
 -- examples simulating plain unix find
 

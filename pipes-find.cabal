@@ -19,10 +19,15 @@ cabal-version:       >=1.10
 library
   hs-source-dirs:      src
   exposed-modules:     System.Posix.Find,
-                       System.Posix.Text.Path,
-                       System.Posix.Find.Types,
                        System.Posix.Find.Combinators,
-                       System.Posix.Find.Ls
+                       System.Posix.Find.Lang.Builtins,
+                       System.Posix.Find.Lang.Eval,
+                       System.Posix.Find.Lang.Parser,
+                       System.Posix.Find.Lang.Predicate,
+                       System.Posix.Find.Lang.Types,
+                       System.Posix.Find.Ls,
+                       System.Posix.Find.Types,
+                       System.Posix.Text.Path
   -- other-modules:
   other-extensions:    TypeFamilies, Rank2Types, KindSignatures, GADTs,
                        DataKinds, LambdaCase, TemplateHaskell, FlexibleInstances,
@@ -35,9 +40,14 @@ library
                        transformers >=0.4 && <0.5,
                        directory >=1.2 && <1.3,
                        pipes >=4.1 && <4.2,
-                       bifunctors,
+                       mtl,
+                       unordered-containers,
                        bytestring,
-                       text
+                       text,
+                       vector,
+                       bifunctors,
+                       parsec,
+                       text-icu
   default-language:    Haskell2010
   ghc-options:         -Wall -fwarn-incomplete-uni-patterns
 
@@ -53,8 +63,6 @@ executable hfind
                        mtl >=2.2 && <2.3,
                        directory >=1.2 && <1.3,
                        pipes >=4.1 && <4.2,
-                       bifunctors,
-                       bytestring,
                        text,
                        pipes-find
   default-language:    Haskell2010
@@ -68,5 +76,5 @@ test-suite spec
   main-is:             Spec.hs
 
   build-depends:       base, deepseq, pipes, text, mtl, bifunctors,
-                       hspec, QuickCheck, quickcheck-instances,
-                       pipes-find
+                       raw-strings-qq, text-icu, hspec, QuickCheck,
+                       quickcheck-instances, pipes-find

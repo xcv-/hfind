@@ -15,7 +15,6 @@ import System.Exit
 import qualified Pipes.Prelude as P
 
 import System.Posix.Find
-import System.Posix.Find.Predicate
 
 
 type EntryTransform m = Pipe (NodeListEntry 'Resolved) (NodeListEntry 'Resolved) m ()
@@ -38,13 +37,13 @@ parseActions ("-if":expr:opts) = do
     (lsP, eP) <- parseActions opts
 
     return ( lsP
-           , P.filter (evalEntryPredicate predicate) >-> eP )
+           , P.filterM (evalEntryPredicate predicate) >-> eP )
 
 parseActions ("-prune":expr:opts) = do
     predicate <- parsePrunePredicate expr
     (lsP, eP) <- parseActions opts
 
-    return ( pruneDirs (evalDirPredicate predicate) >-> lsP
+    return ( pruneDirsM (evalDirPredicate predicate) >-> lsP
            , eP )
 
 parseActions (opt:_) = throwError ("Invalid action: " ++ opt)
