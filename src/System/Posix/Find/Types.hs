@@ -20,6 +20,7 @@ import Pipes
 import qualified Pipes.Prelude as P
 
 import System.Posix.Files (FileStatus)
+import qualified System.Posix.Files as Posix
 
 import System.Posix.Text.Path
 
@@ -64,14 +65,24 @@ type family HasErrors (s :: FSNodeType) :: Bool where
 data FSNode :: PathType -> FSNodeType -> * where
     FileNode ::                        FileStatus -> Path Abs File      -> FSNode File s
     DirNode  ::                        FileStatus -> Path Abs Dir       -> FSNode Dir  s
-    SymLink  :: HasLinks  s ~ 'True => FileStatus -> Link -> FSNode t s -> FSNode t    s
+    Symlink  :: HasLinks  s ~ 'True => FileStatus -> Link -> FSNode t s -> FSNode t    s
     Missing  :: HasErrors s ~ 'True => RawPath                          -> FSNode t    s
     FSCycle  :: HasErrors s ~ 'True => RawPath                          -> FSNode t    s
+
+instance IsPathType t => Eq (FSNode t s) where
+    FileNode stat p == FileNode stat' p' =
+        Posix.fileID stat == Posix.fileID stat' && p == p'
+    DirNode stat p == DirNode stat' p' =
+        Posix.fileID stat == Posix.fileID stat' && p == p'
+    Symlink stat (Link p) _ == Symlink stat' (Link p') _ =
+        Posix.fileID stat == Posix.fileID stat' && p == p'
+    _ == _ = False
+
 
 instance Show (FSNode t l) where
     show (FileNode _ p)  = "File      " ++ show p
     show (DirNode _ p)   = "Directory " ++ show p
-    show (SymLink _ s p) = "SymLink   " ++ show s ++ " -> " ++ show p
+    show (Symlink _ s p) = "Symlink   " ++ show s ++ " -> " ++ show p
     show (Missing p)     = "Missing   " ++ show p
     show (FSCycle p)     = "Cycle     " ++ show p
 

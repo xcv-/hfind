@@ -82,12 +82,31 @@ stringLiteral :: Monad m => ParserT m T.Text
 stringLiteral = T.pack <$> Tok.stringLiteral lang
 
 
-predicateValue :: IsPred pre => Parser pre
+predicateValue :: forall pre. IsPred pre => Parser pre
 predicateValue = parens predicateValue
-             <|> try (notP     <$> (reserved "not" *> parens predicate))
-             <|> try (flip opP <$> expr <*> comparator <*> expr)
-             <|> try (exprP    <$> expr)
-             <?> "expression or operation"
+             <|> try (negation   <?> "negation")
+             <|> try (binaryPred <?> "binary predicate")
+             <|> try (freeExpr   <?> "expression")
+  where
+    negation :: Parser pre
+    negation = notP <$> (reserved "not" *> parens predicate)
+
+    binaryPred :: Parser pre
+    binaryPred = do
+        e1 <- expr
+
+        optionMaybe comparator >>= \case
+            Just op -> do
+                e2 <- expr
+                return (opP op e1 e2)
+            Nothing -> do
+                symbol "=~"
+                (rx, capMode) <- regex
+                return (matchP e1 rx capMode)
+
+    freeExpr :: Parser pre
+    freeExpr = exprP <$> expr
+
 
 predicate :: IsPred pre => Parser pre
 predicate = buildExpressionParser
@@ -98,7 +117,6 @@ predicate = buildExpressionParser
 
 comparator :: Monad m => ParserT m Op
 comparator = try (symbol "==" $> OpEQ)
-         <|> try (symbol "=~" $> OpRX)
          <|> try (symbol "<=" $> OpLE)
          <|> try (symbol ">=" $> OpGE)
          <|> try (symbol "<"  $> OpLT)
@@ -126,7 +144,8 @@ expr = varE        <$> var
           (_, ps')                 -> p:ps'
 
     interp :: Parser [Either T.Text (ExprVar expr)]
-    interp = either throwParseError return . parseInterp =<< stringLiteral
+    interp = flip label "interpolated string" $
+        either throwParseError return . parseInterp =<< stringLiteral
 
     parseInterp :: T.Text -> Either (SourcePos -> ParseError)
                                     [Either T.Text (ExprVar expr)]
@@ -152,41 +171,35 @@ expr = varE        <$> var
                       in Left err
 
 
-litNoString :: IsLit lit => Parser lit
-litNoString = boolL True     <$  reserved "true"
-          <|> boolL False    <$  reserved "false"
-          <|> numL           <$> integerLiteral
-          <|> uncurry regexL <$> regex
+regex :: Parser (Regex, RxCaptureMode)
+regex = flip label "regular expression" $ do
+    void (char 'm')
+    delim <- oneOf "/_@%#!€$"
+
+    let go acc escaped = do
+          c <- anyChar
+          case c of
+            '\\' | escaped   -> go ('\\':'\\':acc) False
+                 | otherwise -> go acc             True
+
+            _ | c == delim -> if escaped then go (c:acc) False
+                                         else return acc
+              | otherwise  -> if escaped then go (c:'\\':acc) False
+                                         else go (c:acc) False
+
+    pattern     <- T.pack . reverse <$> go [] False
+    (cap, opts) <- regexOpts
+
+    erx <- liftIO $ Regex.regex' opts pattern
+
+    case erx of
+      Right rx -> return (rx, cap)
+      Left e   -> let err = parseError (ICU.errorName (Regex.errError e))
+                  in throwParseError $ \pos ->
+                       case Regex.errOffset e of
+                         Just off -> err (incSourceColumn pos off)
+                         Nothing  -> err pos
   where
-    regex :: Parser (Regex, RxCaptureMode)
-    regex = do
-      void (char 'm')
-      delim <- oneOf "/_@%#!€"
-
-      let go acc escaped = do
-            c <- anyChar
-            case c of
-              '\\' | escaped   -> go ('\\':'\\':acc) False
-                   | otherwise -> go acc             True
-
-              _ | c == delim -> if escaped then go (c:acc) False
-                                           else return acc
-                | otherwise  -> if escaped then go (c:'\\':acc) False
-                                           else go (c:acc) False
-
-      pattern     <- T.pack . reverse <$> go [] False
-      (cap, opts) <- regexOpts
-
-      erx <- liftIO $ Regex.regex' opts pattern
-
-      case erx of
-        Right rx -> return (rx, cap)
-        Left e   -> let err = parseError (ICU.errorName (Regex.errError e))
-                    in throwParseError $ \pos ->
-                         case Regex.errOffset e of
-                           Just off -> err (incSourceColumn pos off)
-                           Nothing  -> err pos
-
     regexOpts :: Parser (RxCaptureMode, [Regex.MatchOption])
     regexOpts = do
         opts <- many letter <* whitespace
@@ -202,8 +215,15 @@ litNoString = boolL True     <$  reserved "true"
           (opts', _ ) -> (,) NoCapture <$> mapM translate opts'
 
 
+litNoString :: IsLit lit => Parser lit
+litNoString = boolL True     <$  reserved "true"
+          <|> boolL False    <$  reserved "false"
+          <|> numL           <$> integerLiteral
+          <?> "literal"
+
 var :: (Monad m, IsVar var) => ParserT m var
 var = varNoWhitespace <* whitespace
+  <?> "variable"
 
 varNoWhitespace :: (Monad m, IsVar var) => ParserT m var
 varNoWhitespace = do

@@ -1,3 +1,4 @@
+{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -6,7 +7,6 @@
 module System.Posix.Find.Lang.Types where
 
 import Data.Int (Int64)
-import Data.Vector.Mutable (IOVector)
 
 import Control.Monad.IO.Class
 import Control.Monad.Except
@@ -26,7 +26,6 @@ class IsLit lit where
     boolL   :: Bool   -> lit
     numL    :: Int64  -> lit
     stringL :: T.Text -> lit
-    regexL  :: Regex  -> RxCaptureMode -> lit
 
 class IsVar var where
     namedVar :: T.Text -> var
@@ -47,13 +46,19 @@ class IsExpr (PredExpr pre) => IsPred pre where
     andP  :: pre -> pre -> pre
     orP   :: pre -> pre -> pre
 
-    exprP :: PredExpr pre -> pre
-    opP   :: Op -> PredExpr pre -> PredExpr pre -> pre
+    exprP  :: PredExpr pre -> pre
+    matchP :: PredExpr pre -> Regex -> RxCaptureMode -> pre
+    opP    :: Op -> PredExpr pre -> PredExpr pre -> pre
 
 
 -- predicate AST
 
-data ExprType = TBool | TNum | TString | TRegex
+data Value = BoolV   !Bool
+           | NumV    !Int64
+           | StringV !T.Text
+           | forall t. IsPathType t => NodeV !(FSNode t 'Resolved)
+
+data ValueType = TBool | TNum | TString | TNode
     deriving (Eq, Show)
 
 data RxCaptureMode = Capture | NoCapture
@@ -62,22 +67,21 @@ data RxCaptureMode = Capture | NoCapture
 data Lit = BoolL   !Bool
          | NumL    !Int64
          | StringL !T.Text
-         | RegexL  !Regex  !RxCaptureMode
     deriving (Show)
 
-typeOf :: Lit -> ExprType
-typeOf (BoolL _)    = TBool
-typeOf (NumL _)     = TNum
-typeOf (StringL _)  = TString
-typeOf (RegexL _ _) = TRegex
+typeOf :: Value -> ValueType
+typeOf (BoolV _)   = TBool
+typeOf (NumV _)    = TNum
+typeOf (StringV _) = TString
+typeOf (NodeV _)   = TNode
 
-typeName :: ExprType -> T.Text
+typeName :: ValueType -> T.Text
 typeName TBool   = T.pack "boolean"
 typeName TNum    = T.pack "number"
 typeName TString = T.pack "string"
-typeName TRegex  = T.pack "regex"
+typeName TNode   = T.pack "fsnode"
 
-typeNameOf :: Lit -> T.Text
+typeNameOf :: Value -> T.Text
 typeNameOf = typeName . typeOf
 
 
@@ -91,15 +95,16 @@ data Expr = LitE    !Lit
     deriving (Show)
 
 
-data Op = OpEQ | OpLT | OpLE | OpGT | OpGE | OpRX
+data Op = OpEQ | OpLT | OpLE | OpGT | OpGE
     deriving (Eq, Show)
 
 
-data Pred = NotP  !Pred
-          | AndP  !Pred !Pred
-          | OrP   !Pred !Pred
-          | ExprP !Expr
-          | OpP   !Op !Expr !Expr
+data Pred = NotP   !Pred
+          | AndP   !Pred !Pred
+          | OrP    !Pred !Pred
+          | ExprP  !Expr
+          | MatchP !Expr !Regex !RxCaptureMode
+          | OpP    !Op !Expr !Expr
     deriving Show
 
 
@@ -108,7 +113,6 @@ instance IsLit Lit where
     boolL   = BoolL
     numL    = NumL
     stringL = StringL
-    regexL  = RegexL
 
 instance IsVar Var where
     namedVar = NamedVar
@@ -129,61 +133,7 @@ instance IsPred Pred where
     andP  = AndP
     orP   = OrP
 
-    exprP = ExprP
-    opP   = OpP
+    exprP  = ExprP
+    matchP = MatchP
+    opP    = OpP
 
-
--- pre-evaluated predicates
-
-newtype NodeFunc m = NodeFunc
-    { evalNodeFunc :: forall t. FSNode t 'Resolved -> m Lit }
-
-newtype FilePredicate = FilePredicate
-    { evalFilePredicate :: FSNode 'File 'Resolved -> Bool }
-
-newtype DirPredicate m = DirPredicate
-    { evalDirPredicate :: FSNode 'Dir 'Resolved -> m Bool }
-
-newtype NodePredicate m = NodePredicate
-    { evalNodePredicate :: forall t. FSNode t 'Resolved -> m Bool }
-
-newtype EntryPredicate m = EntryPredicate
-    { evalEntryPredicate :: NodeListEntry 'Resolved -> m Bool }
-
-
--- preprocessing/evaluation contexts
-
-type VarId   = Int
-type VarName = T.Text
-
-data ScanningContext = ScanningContext
-  { ctxVars           :: ![VarName] -- reversed
-  , ctxNumVars        :: !Int
-  , ctxNumCaptures    :: !Int
-  , ctxMaxNumVars     :: !Int
-  , ctxMaxNumCaptures :: !Int
-  }
-
-data EvalContext = EvalContext
-  { ctxValues      :: !(IOVector Lit) -- reversed
-  , ctxActiveRegex :: !(Maybe Regex)  -- not reversed
-  }
-
-
--- TODO: error location info
-
-data VarNotFoundError = VarNotFound !Var
-
-data TypeError = ExpectedButFound !T.Text !T.Text
-
-expectedButFound :: ExprType -> ExprType -> TypeError
-t `expectedButFound` t' = typeName t `ExpectedButFound` typeName t'
-
-
-type Evaluating n =
-      (MonadIO n, MonadError TypeError n, MonadState EvalContext n)
-
-type Scanning m =
-      (MonadIO m, MonadError VarNotFoundError m, MonadState ScanningContext m)
-
-type ScanningFor m n = (Scanning m, Evaluating n)

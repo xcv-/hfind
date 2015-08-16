@@ -1,7 +1,7 @@
 pipes-find
 ==========
 
-First working executable already available!
+Filtering and pruning by name already works!
 
 To run it,
 ```
@@ -9,8 +9,8 @@ cabal sandbox init
 cabal install --dependencies-only
 cabal configure
 cabal build
-dist/build/hfind/hfind .
-dist/build/hfind/hfind -L .
+dist/build/hfind  # prints usage
+dist/build/hfind src -if '$name =~ m/\.hs/'
 ```
 
-/Note/: -L has the same meaning as in the regular `find` command (follow symlinks)
+_Note_: -L has the same meaning as in the regular `find` command (follow symlinks)

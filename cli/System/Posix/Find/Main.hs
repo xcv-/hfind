@@ -1,11 +1,12 @@
+{-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeFamilies #-}
 module System.Posix.Find.Main (main) where
 
+import Control.Monad (when)
 import Control.Monad.Trans.Except
-import Control.Monad.Except
 
 import qualified Data.Text as T
 
@@ -15,83 +16,165 @@ import System.Exit
 import qualified Pipes.Prelude as P
 
 import System.Posix.Find
+import System.Posix.Find.Lang.Context (ScanT, runScanT, EvalT, runEvalT,
+                                       Evaluator)
+
+import Text.RawString.QQ (r)
 
 
 type EntryTransform m = Pipe (NodeListEntry 'Resolved) (NodeListEntry 'Resolved) m ()
 
+data Transforms = Transforms
+    { treeTransform     :: !(TransformR     (EvalT IO))
+    , listTransform     :: !(EntryTransform (EvalT IO))
+    , hasTreeTransforms :: !Bool
+    }
 
-parsePathArg :: String -> ExceptT String IO (Path Abs Dir)
-parsePathArg path = do
+parseLinkStratArg :: [String] -> (Bool, [String])
+parseLinkStratArg args =
+    case args of
+        "-L":args' -> (True,  args')
+        args'      -> (False, args')
+
+parsePathArg :: [String] -> ExceptT String IO (Path Abs Dir, [String])
+parsePathArg [] = throwE "Expected search path"
+parsePathArg (path:args') = do
     ecanonicalized <- liftIO $ canonicalizeFromHere (T.pack path)
 
     case ecanonicalized of
-        Right p -> return (asDirPath p)
-        Left p  -> throwError ("Invalid path: " ++ T.unpack p)
+        Right p -> return (asDirPath p, args')
+        Left p  -> throwE $ "Invalid path: " ++ T.unpack p
 
 
-parseActions :: Monad m
-             => [String]
-             -> ExceptT String IO (TransformR m, EntryTransform m)
+parseActions :: [String] -> ScanT (ExceptT String IO) Transforms
 parseActions ("-if":expr:opts) = do
-    predicate <- parseFilterPredicate expr
-    (lsP, eP) <- parseActions opts
+    predicate  <- parseFilterPredicate expr
+    transforms <- parseActions opts
 
-    return ( lsP
-           , P.filterM (evalEntryPredicate predicate) >-> eP )
+    when (hasTreeTransforms transforms) $
+        lift.throwE $ "cannot perform tree actions (like -prune) after a \
+                      \list action (like -if)"
+
+    return transforms {
+        listTransform =
+            P.filterM (evalEntryPredicate predicate)
+                >-> listTransform transforms
+    }
 
 parseActions ("-prune":expr:opts) = do
-    predicate <- parsePrunePredicate expr
-    (lsP, eP) <- parseActions opts
+    predicate  <- parsePrunePredicate expr
+    transforms <- parseActions opts
 
-    return ( pruneDirsM (evalDirPredicate predicate) >-> lsP
-           , eP )
+    return transforms {
+        hasTreeTransforms = True,
+        treeTransform =
+            pruneDirsM (evalDirPredicate predicate)
+                >-> treeTransform transforms
+    }
 
-parseActions (opt:_) = throwError ("Invalid action: " ++ opt)
-parseActions []      = return (cat, cat)
+parseActions (opt:_) = lift $ throwE ("Invalid action: " ++ opt)
+parseActions []      = return (Transforms cat cat False)
 
 
-parseArgs :: Monad m
-          => [String]
-          -> ExceptT String IO (Path Abs Dir, TransformR m, EntryTransform m)
-parseArgs [] = throwError "Expected starting path"
-parseArgs (pathArg:opts) = do
-    path      <- parsePathArg pathArg
-    (lsP, eP) <- parseActions opts
+parseArgs :: ExceptT String IO (Bool, Path Abs Dir, Transforms, Evaluator)
+parseArgs = do
+    args <- liftIO getArgs
 
-    return (path, lsP, eP)
+    let (links, args') = parseLinkStratArg args
 
+    (path, args'') <- parsePathArg args'
+
+    res <- runScanT path (parseActions args'')
+
+    case res of
+        Right (trns, evaluator) ->
+            return (links, path, trns, evaluator)
+
+        Left err -> liftIO $ do
+            let errmsg = show err
+
+            putStrLn $ "error parsing arguments: " ++ show errmsg
+            putStrLn ""
+            die usage
 
 
 main :: IO ()
 main = do
-    prog <- getProgName
+    (links, path, trns, evaluator) <- runExceptT parseArgs >>= \case
+        Right res -> return res
+        Left  err -> do
+            putStrLn err
+            putStrLn ""
+            die usage
 
-    (links, args) <- getArgs <&> \case
-                         "-L":args' -> (True,  args')
-                         args'      -> (False, args')
+    let tree
+         | links     = (ls followSymlinks   path >>= yield) >-> followLinks
+         | otherwise = (ls symlinksAreFiles path >>= yield)
 
-    (path, lsP, eP) <- runExceptT (parseArgs args) >>= \case
-                           Right r  -> return r
-                           Left err -> die $ unlines
-                              [ "Error parsing arguments: " ++ err
-                              , ""
-                              , "usage: " ++ prog ++ " <path> [actions...]"
-                              , "  actions:"
-                              , "    -if expr:    allow only entries matching expr"
-                              , "    -prune expr: filter subtrees matching expr"
-                              ]
+    res <- runEvalT evaluator $ runEffect $ tree
+               >-> onError report
+               >-> treeTransform trns
+               >-> flatten
+               >-> listTransform trns
+               >-> asPaths
+               >-> asFiles
+               >-> stringPaths
+               >-> P.stdoutLn
 
-    let listing
-         | links     = (ls FollowSymLinks   path >>= yield) >-> followLinks
-         | otherwise = (ls SymLinksAreFiles path >>= yield)
+    case res of
+        Right () -> return ()
+        Left e   -> die (show e)
 
-    runEffect $
-        listing
-            >-> onError report
-            >-> lsP
-            >-> flatten
-            >-> eP
-            >-> asPaths
-            >-> asFiles
-            >-> stringPaths
-            >-> P.stdoutLn
+
+
+usage :: String
+usage = [r|usage: hfind [-L] <path> [actions...]
+
+flags:
+  -L           follow symlinks
+
+supported actions:
+  -if pred:    allow only entries satisfying pred
+  -prune pred: filter subtrees with root matching pred
+
+predicate syntax:
+  expr
+
+  not (pred)
+
+  pred1 && pred2        pred1 || pred2
+
+  expr1 == expr2        expr1 != expr2
+  expr1 >= expr2        expr1 <= expr2
+  expr1 >  expr2        expr1 <  expr2
+
+  expr =~ m/pcre regex/mxsin
+
+  valid regex delimiters:
+    / _ @ % # ! $ €
+
+  regex options:
+    m: multiline               s: dot matches newlines
+    x: allow spaces/comments   i: case insensitive
+    n: do not capture
+
+expression syntax:
+  $var
+  lit
+  "interpolated string with $variables, escape dollars with $$"
+
+variable syntax:
+  $identifier
+  $previous_regex_capture_index
+
+builtin (magic) variables:
+  $name:   file name
+  $path:   absolute path
+  $hidden: whether $name starts with '.'
+
+literal syntax:
+  "string"
+  12312319283791283 (64-bit integer)
+  true
+  false |]
+

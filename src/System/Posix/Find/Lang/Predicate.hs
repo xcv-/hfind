@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 module System.Posix.Find.Lang.Predicate
   ( DirPredicate(..)
@@ -6,19 +7,32 @@ module System.Posix.Find.Lang.Predicate
   , parseFilterPredicate
   ) where
 
-import Control.Monad.Trans.Except
+import Control.Monad.Except
+import Control.Monad.Morph
 
-import System.Posix.Find.Lang.Types
+import qualified Data.Text as T
+
+import System.Posix.Find.Lang.Context
+import System.Posix.Find.Lang.Eval (runPredScan)
+import System.Posix.Find.Lang.Parser
+import System.Posix.Find.Types (ListEntry(..))
 
 
-parsePrunePredicate :: Monad n => String -> ExceptT String IO (DirPredicate n)
-parsePrunePredicate _ = return $ DirPredicate (const (return False))
+parsePrunePredicate :: String -> ScanT (ExceptT String IO) DirPredicate
+parsePrunePredicate s = do
+    p <- parseFilterPredicate s
 
-parseFilterPredicate :: Monad n => String -> ExceptT String IO (EntryPredicate n)
-parseFilterPredicate _ = return $ EntryPredicate (const (return True))
+    return (DirPredicate (\n -> evalEntryPredicate p (DirEntry n)))
 
-{-
-parseNodePredicate :: String -> Either String (Maybe PathType, NodePredicate)
-parseNodePredicate =
-    either show id . parse nodePredicateParser "<argument>"
--}
+
+parseFilterPredicate :: String -> ScanT (ExceptT String IO) EntryPredicate
+parseFilterPredicate s = do
+    r <- liftIO $ parsePred s (T.pack s)
+
+    case r of
+        Right mp -> do
+            p <- hoist lift (runPredScan mp)
+            return $ EntryPredicate $ \case
+                DirEntry n  -> evalNodePredicate p n
+                FileEntry n -> evalNodePredicate p n
+        Left err -> lift $ throwError (show err)

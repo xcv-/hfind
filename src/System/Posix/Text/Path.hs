@@ -1,3 +1,6 @@
+{-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE LambdaCase #-}
@@ -17,6 +20,8 @@ import qualified Data.Text.Encoding as T
 import qualified Data.ByteString as B
 
 import qualified System.Directory as D
+
+import Unsafe.Coerce
 
 
 data PathMode = Rel  | Abs
@@ -67,22 +72,6 @@ instance IsPathType 'Dir where
     getPathType _ = Dir
 
 
-class (IsPathType t, IsPathType t') => CoerciblePath t t' where
-    coercePath :: Path Abs t -> Path Abs t'
-
-instance CoerciblePath 'File 'Dir where
-    coercePath = Path . flip T.snoc '/' . toText
-
-instance CoerciblePath 'Dir  'File where
-    coercePath = Path . T.init . toText
-
-instance CoerciblePath 'File 'File where
-    coercePath = id
-
-instance CoerciblePath 'Dir 'Dir where
-    coercePath = id
-
-
 dropTrailingSlash :: RawPath -> RawPath
 dropTrailingSlash p
   | p == "/"        = -- WARNING: removing the slash here could cause a lot of pain
@@ -99,11 +88,21 @@ addTrailingSlash p
   | otherwise       = T.snoc p '/'
 
 
-asFilePath :: CoerciblePath t File => Path Abs t -> Path Abs File
-asFilePath = coercePath
+asFilePath :: Path Abs t -> Path Abs File
+asFilePath (Path "")  = Path ""
+asFilePath (Path "/") = Path ""
+asFilePath (Path p)   = Path (dropTrailingSlash p)
 
-asDirPath :: CoerciblePath t Dir =>  Path Abs t -> Path Abs Dir
-asDirPath = coercePath
+asDirPath :: Path Abs t -> Path Abs Dir
+asDirPath (Path "")  = Path "/"
+asDirPath (Path "/") = Path "/"
+asDirPath (Path p)   = Path (addTrailingSlash p)
+
+coercePath :: forall t t'. IsPathType t' => Path Abs t -> Path Abs t'
+coercePath p =
+    case getPathType (undefined :: Path Abs t') of
+        File -> unsafeCoerce (asFilePath p)
+        Dir  -> unsafeCoerce (asDirPath p)
 
 
 (</>) :: Path b Dir -> Path Rel t -> Path b t
@@ -123,12 +122,20 @@ unsafeAbsDir :: RawPath -> Path Abs Dir
 unsafeAbsDir = Path
 
 
-parent :: CoerciblePath t File => Path Abs t -> Maybe (Path Abs Dir)
-parent (Path "")  = Nothing
-parent (Path "/") = Nothing
-parent p          = Just $ unsafeAbsDir (T.dropWhileEnd (/='/') fp)
+
+unsnocPath :: Path Abs t -> Maybe (Path Abs Dir, T.Text)
+unsnocPath (Path "")  = Nothing
+unsnocPath (Path "/") = Nothing
+unsnocPath (Path fp)  = Just (unsafeAbsDir dir, base)
   where
-    (Path fp) = asFilePath p
+    (dir, base) = let noTrailing = T.dropWhileEnd (=='/') fp
+                  in T.breakOnEnd "/" noTrailing
+
+parent :: Path Abs t -> Maybe (Path Abs Dir)
+parent = fmap fst . unsnocPath
+
+filename :: Path Abs t -> Maybe T.Text
+filename = fmap snd . unsnocPath
 
 
 isAbsolute :: RawPath -> Bool
@@ -160,8 +167,7 @@ canonicalizeUnder parentPath p =
       | isAbsolute d = d
       | otherwise    = toText (parentPath </> unsafeRelFile p)
 
-canonicalizeBeside :: CoerciblePath t File
-                   => Path Abs t -> RawPath -> Either RawPath (Path Abs File)
+canonicalizeBeside :: Path Abs t -> RawPath -> Either RawPath (Path Abs File)
 canonicalizeBeside sibling p =
     flip canonicalizeUnder p =<< maybe (Left p) Right (parent sibling)
 

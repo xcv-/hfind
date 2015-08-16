@@ -135,7 +135,7 @@ pruneDirsM p = skipF2M (const $ return False) p
 follow :: forall s s' t. (HasErrors s ~ HasErrors s') => FSNode t s -> FSNode t s'
 follow (FileNode stat p) = FileNode stat p
 follow (DirNode  stat p) = DirNode  stat p
-follow (SymLink _ l n)   =
+follow (Symlink _ l n)   =
     case follow n :: FSNode t s' of
         FileNode stat _ -> FileNode stat (asFilePath (getLinkPath l))
         DirNode stat _  -> DirNode stat  (asDirPath  (getLinkPath l))
@@ -155,7 +155,7 @@ report :: (MonadIO m, HasLinks s ~ HasLinks s') => NodeFilter m s s'
 report = \case
     FileNode stat p  -> yield (FileNode stat p)
     DirNode stat p   -> yield (DirNode stat p)
-    SymLink stat l p -> for (report p) (yield . SymLink stat l)
+    Symlink stat l p -> for (report p) (yield . Symlink stat l)
     Missing p        -> liftIO $ hPutStrLn stderr ("*** File not found " ++ show p)
     FSCycle l        -> liftIO $ hPutStrLn stderr ("*** File system cycle at " ++ show l)
 
@@ -163,7 +163,7 @@ silence :: (Monad m, HasLinks s ~ HasLinks s') => NodeFilter m s s'
 silence = \case
     FileNode stat p  -> yield (FileNode stat p)
     DirNode stat p   -> yield (DirNode stat p)
-    SymLink stat l p -> for (silence p) (yield . SymLink stat l)
+    Symlink stat l p -> for (silence p) (yield . Symlink stat l)
     Missing _        -> return ()
     FSCycle _        -> return ()
 

@@ -21,6 +21,7 @@ library
   exposed-modules:     System.Posix.Find,
                        System.Posix.Find.Combinators,
                        System.Posix.Find.Lang.Builtins,
+                       System.Posix.Find.Lang.Context,
                        System.Posix.Find.Lang.Eval,
                        System.Posix.Find.Lang.Parser,
                        System.Posix.Find.Lang.Predicate,
@@ -41,6 +42,7 @@ library
                        directory >=1.2 && <1.3,
                        pipes >=4.1 && <4.2,
                        mtl,
+                       mmorph,
                        unordered-containers,
                        bytestring,
                        text,
@@ -63,6 +65,7 @@ executable hfind
                        mtl >=2.2 && <2.3,
                        directory >=1.2 && <1.3,
                        pipes >=4.1 && <4.2,
+                       raw-strings-qq,
                        text,
                        pipes-find
   default-language:    Haskell2010

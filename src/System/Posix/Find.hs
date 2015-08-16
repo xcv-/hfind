@@ -19,7 +19,7 @@ import System.Posix.Find.Lang.Predicate as X
 
 find :: Path Abs Dir -> IO ()
 find p = runEffect $
-    (ls SymLinksAreFiles p >>= yield)
+    (ls symlinksAreFiles p >>= yield)
       >-> onError report
       >-> is resolved
       >-> flatten
@@ -30,7 +30,7 @@ find p = runEffect $
 
 findL :: Path Abs Dir -> IO ()
 findL p = runEffect $
-    (ls FollowSymLinks p >>= yield)
+    (ls followSymlinks p >>= yield)
       >-> followLinks
       >-> onError report
       >-> is resolved
