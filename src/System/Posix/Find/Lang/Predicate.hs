@@ -15,7 +15,7 @@ import qualified Data.Text as T
 import System.Posix.Find.Lang.Context
 import System.Posix.Find.Lang.Eval (runPredScan)
 import System.Posix.Find.Lang.Parser
-import System.Posix.Find.Types (ListEntry(..))
+import System.Posix.Find.Types (ListEntry(..), FSAnyNode(..))
 
 
 parsePrunePredicate :: String -> ScanT (ExceptT String IO) DirPredicate
@@ -33,6 +33,6 @@ parseFilterPredicate s = do
         Right mp -> do
             p <- hoist lift (runPredScan mp)
             return $ EntryPredicate $ \case
-                DirEntry n  -> evalNodePredicate p n
-                FileEntry n -> evalNodePredicate p n
+                DirEntry n  -> p (AnyNode n)
+                FileEntry n -> p (AnyNode n)
         Left err -> lift $ throwError (show err)

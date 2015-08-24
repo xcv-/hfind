@@ -3,7 +3,13 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
-module System.Posix.Find.Ls where
+module System.Posix.Find.Ls
+    ( SymlinkStrategy
+    , followSymlinks
+    , symlinksAreFiles
+    , loadNodeAt
+    , ls
+    ) where
 
 import Control.Monad
 import Control.Monad.IO.Class
@@ -50,8 +56,8 @@ followSymlinks = SymlinkStrategy discriminate
               tdest <- T.decodeUtf8 <$> Posix.readSymbolicLink bpath
 
               case canonicalizeBeside path tdest of
-                  Right p' -> discriminatePath followSymlinks (inode:visited) p'
-                  Left _   -> throwM (FileNotFoundError tdest)
+                  Just p'  -> discriminatePath followSymlinks (inode:visited) p'
+                  Nothing  -> throwM (FileNotFoundError tdest)
 
           let link = Link path
 
@@ -96,6 +102,20 @@ discriminatePath strat = go
                   (visited', DirEntry  (DirNode  stat (asDirPath  path)))
               | otherwise ->
                   (visited', FileEntry (FileNode stat (asFilePath path)))
+
+
+loadNodeAt :: forall s. HasErrors s ~ 'True
+           => Path Abs File -> SymlinkStrategy s -> IO (FSAnyNode s)
+loadNodeAt path strat = handling $ do
+    (_, entry) <- discriminatePath strat [] path
+
+    case entry of
+        FileEntry file -> return (AnyNode file)
+        DirEntry dir   -> return (AnyNode dir)
+  where
+    handling :: IO (FSAnyNode s) -> IO (FSAnyNode s)
+    handling = handle (\(FSCycleError l)      -> return $! AnyNode (FSCycle l))
+             . handle (\(FileNotFoundError p) -> return $! AnyNode (Missing p))
 
 
 ls :: forall m io s.

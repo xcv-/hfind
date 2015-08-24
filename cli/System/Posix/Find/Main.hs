@@ -39,11 +39,11 @@ parseLinkStratArg args =
 parsePathArg :: [String] -> ExceptT String IO (Path Abs Dir, [String])
 parsePathArg [] = throwE "Expected search path"
 parsePathArg (path:args') = do
-    ecanonicalized <- liftIO $ canonicalizeFromHere (T.pack path)
+    mcanonicalized <- liftIO $ canonicalizeFromHere (T.pack path)
 
-    case ecanonicalized of
-        Right p -> return (asDirPath p, args')
-        Left p  -> throwE $ "Invalid path: " ++ T.unpack p
+    case mcanonicalized of
+        Just p  -> return (asDirPath p, args')
+        Nothing -> throwE $ "Invalid path: " ++ path
 
 
 parseActions :: [String] -> ScanT (ExceptT String IO) Transforms

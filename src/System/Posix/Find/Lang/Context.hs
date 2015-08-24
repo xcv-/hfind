@@ -4,40 +4,34 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE RankNTypes #-}
 module System.Posix.Find.Lang.Context
-  ( VarName
-  , VarId
-  -- errors
-  , VarNotFoundError(..)
-  , TypeError(..)
-  , expectedButFound
-  -- monads
-  , ScanT
-  , EvalT
-  , runScanT
-  , Evaluator(..)
-  -- predicates
-  , NodeFunc(..)
-  , FilePredicate(..)
-  , DirPredicate(..)
-  , NodePredicate(..)
-  , EntryPredicate(..)
-  -- Scan
-  , ScanConfig(..)
-  , readonly
-  , addVar
-  , getNumCaptures
-  , updateNumCaptures
-  , getVarId
-  -- Builtins
-  , Builtins
-  , builtinVars
-  , lookupBuiltin
-  -- Eval
-  , getVarValue
-  , setVarValue
-  , getCaptureValue
-  , setCaptures
-  ) where
+    ( VarId
+    -- monads
+    , ScanT
+    , EvalT
+    , runScanT
+    , Evaluator(..)
+    -- predicates
+    , NodeFunc(..)
+    , FilePredicate(..)
+    , DirPredicate(..)
+    , NodePredicate(..)
+    , EntryPredicate(..)
+    -- Scan
+    , ScanConfig(..)
+    , readonly
+    , addVar
+    , getNumCaptures
+    , updateNumCaptures
+    , getVarId
+    -- Builtins
+    , lookupBuiltinVar
+    , lookupBuiltinFunc
+    -- Eval
+    , getVarValue
+    , setVarValue
+    , getCaptureValue
+    , setCaptures
+    ) where
 
 import Control.Applicative
 import Control.Monad.IO.Class
@@ -56,24 +50,21 @@ import qualified Data.Text.Foreign  as T
 import Data.Text.ICU.Regex (Regex)
 import qualified Data.Text.ICU.Regex as Regex
 
-import qualified Data.HashMap.Strict as H
-
 import Data.Vector.Mutable (IOVector)
 import qualified Data.Vector.Mutable as V
 
-import System.Posix.Text.Path (Path, Abs, File, Dir)
+import System.Posix.Text.Path (Path, Abs, File, Dir, IsPathType)
 
 import System.Posix.Find.Types
 import System.Posix.Find.Lang.Types
 
-import qualified System.Posix.Find.Lang.Builtins as Builtin
+import qualified System.Posix.Find.Lang.Builtins as Builtins
 
 
-type VarName = T.Text
 newtype VarId = VarId Int
 
 data ScanContext = ScanContext
-    { ctxVars           :: ![VarName] -- reversed
+    { ctxVars           :: ![Name] -- reversed
     , ctxNumVars        :: !Int
     , ctxNumCaptures    :: !Int
     }
@@ -92,24 +83,11 @@ defEvalContext maxVals = do
     return (EvalContext vals Nothing)
 
 
--- TODO: error location info
-
-data VarNotFoundError = VarNotFound       !Var
-                      | CaptureOutOfRange !Int
-    deriving Show
-
-data TypeError = !T.Text `ExpectedButFound` !T.Text
-    deriving Show
-
-expectedButFound :: ValueType -> ValueType -> TypeError
-t `expectedButFound` t' = typeName t `ExpectedButFound` typeName t'
-
-
 -- ScanT/EvalT transformers -----------------------------------------
 
-data ScanConfig = ScanConfig -- lazy (initialized as fixpoint)
-    { scanRootDir  :: Path Abs Dir
-    , scanBuiltins :: Builtins
+data ScanConfig = ScanConfig
+    { scanRoot     :: Path Abs Dir
+    , scanBuiltins :: Builtins.Builtins (EvalT IO)
     }
 
 newtype ScanT m a =
@@ -123,11 +101,11 @@ newtype ScanT m a =
               MonadIO)
 
 newtype EvalT m a =
-    EvalT (ExceptT TypeError
+    EvalT (ExceptT RuntimeError
             (StateT EvalContext m)
               a)
     deriving (Functor, Applicative, Monad,
-              MonadError TypeError,
+              MonadError RuntimeError,
               MonadIO, MonadThrow, MonadCatch)
 
 instance MonadTrans ScanT where
@@ -145,16 +123,19 @@ instance MFunctor EvalT where
 type Eval a = forall m. MonadIO m => EvalT m a
 type Scan a = forall m. MonadIO m => ScanT m a
 
+type BuiltinVar  = Builtins.BuiltinVar  (EvalT IO)
+type BuiltinFunc = Builtins.BuiltinFunc (EvalT IO)
+
 
 newtype Evaluator = Evaluator
-    { runEvalT :: forall m a. MonadIO m => EvalT m a -> m (Either TypeError a) }
+    { runEvalT :: forall m a. MonadIO m => EvalT m a -> m (Either RuntimeError a) }
 
 runScanT :: MonadIO m
          => Path Abs Dir
          -> ScanT m a
          -> m (Either VarNotFoundError (a, Evaluator))
 runScanT root (ScanT m) = do
-    let cfg = ScanConfig root (mkBuiltins cfg)
+    let cfg = ScanConfig root (Builtins.mkBuiltins root)
 
     (ma, s) <- runReaderT (runStateT (runExceptT m) defScanContext) cfg
 
@@ -169,7 +150,8 @@ runScanT root (ScanT m) = do
 -- polymorphic functions/predicates ---------------------------------
 
 newtype NodeFunc = NodeFunc
-    { evalNodeFunc :: forall t. FSNode t 'Resolved -> EvalT IO Value }
+    { evalNodeFunc :: forall t. IsPathType t
+                   => FSNode t 'Resolved -> EvalT IO Value }
 
 newtype FilePredicate = FilePredicate
     { evalFilePredicate :: FSNode File 'Resolved -> EvalT IO Bool }
@@ -178,7 +160,8 @@ newtype DirPredicate = DirPredicate
     { evalDirPredicate :: FSNode Dir 'Resolved -> EvalT IO Bool }
 
 newtype NodePredicate = NodePredicate
-    { evalNodePredicate :: forall t. FSNode t 'Resolved -> EvalT IO Bool }
+    { evalNodePredicate :: forall t. IsPathType t
+                        => FSNode t 'Resolved -> EvalT IO Bool }
 
 newtype EntryPredicate = EntryPredicate
     { evalEntryPredicate :: NodeListEntry 'Resolved -> EvalT IO Bool }
@@ -195,7 +178,7 @@ readonly (ScanT m) = ScanT $ do
     return a
 
 
-addVar :: VarName -> Scan VarId
+addVar :: Name -> Scan VarId
 addVar name = ScanT $ do
     modify $ \ctx ->
       ctx { ctxVars       = (name : ctxVars ctx)
@@ -212,45 +195,26 @@ updateNumCaptures NoCapture _  = return ()
 updateNumCaptures Capture   rx = ScanT $ do
     numCaptures <- liftIO $ Regex.groupCount rx
 
-    modify $ \ctx -> ctx { ctxNumCaptures = numCaptures }
+    -- +1 because the full pattern is $0
+    modify $ \ctx -> ctx { ctxNumCaptures = numCaptures+1 }
 
-getVarId :: VarName -> Scan (Maybe VarId)
+getVarId :: Name -> Scan (Maybe VarId)
 getVarId name = ScanT $ do
     vars <- gets ctxVars
 
     return $ VarId <$> findIndex (==name) vars
 
 
--- Builtins ---------------------------------------------------------
+lookupBuiltinVar :: Name -> Scan (Maybe BuiltinVar)
+lookupBuiltinVar name = ScanT $ do
+    builtins <- asks scanBuiltins
+    return $! Builtins.lookupVar builtins name
 
-newtype Builtins = Builtins (H.HashMap T.Text NodeFunc)
+lookupBuiltinFunc :: Name -> Scan (Maybe BuiltinFunc)
+lookupBuiltinFunc name = ScanT $ do
+    builtins <- asks scanBuiltins
+    return $! Builtins.lookupFunc builtins name
 
-builtinVars :: Scan [T.Text]
-builtinVars = do
-    Builtins builtins <- asks scanBuiltins
-    return (H.keys builtins)
-
-lookupBuiltin :: MonadIO m => T.Text -> ScanT m (Maybe NodeFunc)
-lookupBuiltin name = do
-    Builtins builtins <- asks scanBuiltins
-    return (H.lookup name builtins)
-
-
-mkBuiltins :: ScanConfig -> Builtins
-mkBuiltins root = Builtins $ H.fromList
-    [ ("type",    NodeFunc (lift . Builtin.var_type))
-    , ("hidden",  NodeFunc (lift . Builtin.var_hidden))
-    , ("name",    NodeFunc (lift . Builtin.var_name))
-    , ("path",    NodeFunc (lift . Builtin.var_path))
-    , ("relpath", NodeFunc (lift . Builtin.var_relpath))
-    , ("parent",  NodeFunc (lift . Builtin.var_parent))
-    , ("size",    NodeFunc (lift . Builtin.var_size))
-    , ("perms",   NodeFunc (lift . Builtin.var_perms))
-    , ("owner",   NodeFunc (lift . Builtin.var_owner))
-    , ("ownerid", NodeFunc (lift . Builtin.var_ownerid))
-    , ("group",   NodeFunc (lift . Builtin.var_group))
-    , ("groupid", NodeFunc (lift . Builtin.var_groupid))
-    ]
 
 
 -- Eval primitives --------------------------------------------------

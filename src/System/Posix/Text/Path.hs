@@ -159,19 +159,21 @@ normalize p = p
         ".." -> \(!i, p') -> (i+1, p')
         d    -> \(!i, p') -> if i == 0 then (0, d:p') else (i-1, p')
 
-canonicalizeUnder :: Path Abs Dir -> RawPath -> Either RawPath (Path Abs File)
+canonicalizeUnder :: Path Abs Dir -> RawPath -> Maybe (Path Abs File)
+canonicalizeUnder _         "" = Nothing
 canonicalizeUnder parentPath p =
-    maybe (Left p) Right $ Path <$> normalize (absolute p)
+    Path <$> normalize (absolute p)
   where
     absolute d
       | isAbsolute d = d
       | otherwise    = toText (parentPath </> unsafeRelFile p)
 
-canonicalizeBeside :: Path Abs t -> RawPath -> Either RawPath (Path Abs File)
-canonicalizeBeside sibling p =
-    flip canonicalizeUnder p =<< maybe (Left p) Right (parent sibling)
+canonicalizeBeside :: Path Abs t -> RawPath -> Maybe (Path Abs File)
+canonicalizeBeside sibling p = do
+    parentPath <- parent sibling
+    canonicalizeUnder parentPath p
 
-canonicalizeFromHere :: RawPath -> IO (Either RawPath (Path Abs File))
+canonicalizeFromHere :: RawPath -> IO (Maybe (Path Abs File))
 canonicalizeFromHere p = do
     here <- unsafeAbsDir . addTrailingSlash . T.pack <$> D.getCurrentDirectory
     return (canonicalizeUnder here p)

@@ -43,7 +43,7 @@ instance Monad m => Bifunctor (Ls m) where
     bimap ffp fdp (DirP dp mbs) = DirP (fdp dp) (mbs >-> P.map (bimap ffp fdp))
 
 type LsP  m   = Ls m (Path Abs File) (Path Abs Dir)
-type LsN  m l = Ls m (FSNode File l) (FSNode Dir l)
+type LsN  m s = Ls m (FSNode File s) (FSNode Dir s)
 type LsL  m   = LsN m 'WithLinks
 type LsN' m   = LsN m 'WithoutLinks
 type LsR  m   = LsN m 'Resolved
@@ -70,21 +70,25 @@ data FSNode :: PathType -> FSNodeType -> * where
     FSCycle  :: HasErrors s ~ 'True => RawPath                          -> FSNode t    s
 
 instance IsPathType t => Eq (FSNode t s) where
-    FileNode stat p == FileNode stat' p' =
-        Posix.fileID stat == Posix.fileID stat' && p == p'
-    DirNode stat p == DirNode stat' p' =
-        Posix.fileID stat == Posix.fileID stat' && p == p'
-    Symlink stat (Link p) _ == Symlink stat' (Link p') _ =
-        Posix.fileID stat == Posix.fileID stat' && p == p'
-    _ == _ = False
+    (==) = nodeEq
 
-
-instance Show (FSNode t l) where
+instance Show (FSNode t s) where
     show (FileNode _ p)  = "File      " ++ show p
     show (DirNode _ p)   = "Directory " ++ show p
     show (Symlink _ s p) = "Symlink   " ++ show s ++ " -> " ++ show p
     show (Missing p)     = "Missing   " ++ show p
     show (FSCycle p)     = "Cycle     " ++ show p
+
+
+nodeEq :: FSNode t s -> FSNode t' s -> Bool
+nodeEq (FileNode stat p) (FileNode stat' p') =
+    Posix.fileID stat == Posix.fileID stat' && p == p'
+nodeEq (DirNode stat p)  (DirNode stat' p') =
+    Posix.fileID stat == Posix.fileID stat' && p == p'
+nodeEq (Symlink stat (Link p) _) (Symlink stat' (Link p') _) =
+    Posix.fileID stat == Posix.fileID stat' && p == p'
+nodeEq _ _ =
+    False
 
 
 nodePath :: (HasErrors s ~ 'False, HasLinks s ~ 'False)
@@ -93,6 +97,19 @@ nodePath (FileNode _ p) = p
 nodePath (DirNode _ p)  = p
 nodePath _ =
     error "System.Posix.Find.Types.nodePath: the impossible just happened!"
+
+nodeStat :: (HasErrors s ~ 'False, HasLinks s ~ 'False)
+         => FSNode t s -> FileStatus
+nodeStat (FileNode stat _) = stat
+nodeStat (DirNode  stat _) = stat
+nodeStat _ =
+    error "System.Posix.Find.Types.nodeStat: the impossible just happened!"
+
+
+data FSAnyNode s = forall t. AnyNode (FSNode t s)
+
+instance Eq (FSAnyNode 'Resolved) where
+    AnyNode n1 == AnyNode n2 = n1 `nodeEq` n2
 
 
 -- listing

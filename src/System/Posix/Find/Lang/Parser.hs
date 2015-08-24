@@ -63,6 +63,9 @@ lang = Tok.makeTokenParser langDef
 whitespace :: Monad m => ParserT m ()
 whitespace = Tok.whiteSpace lang
 
+identifier :: Monad m => ParserT m T.Text
+identifier = T.pack <$> Tok.identifier lang
+
 parens :: Monad m => ParserT m a -> ParserT m a
 parens = Tok.parens lang
 
@@ -124,10 +127,16 @@ comparator = try (symbol "==" $> OpEQ)
          <?> "comparison operator"
 
 expr :: forall expr. IsExpr expr => Parser expr
-expr = varE        <$> var
-   <|> litE        <$> litNoString
+expr = parens expr
+   <|> varE        <$> var
+   <|> litE        <$> try litNoString
    <|> simplInterp <$> interp
+   <|> app
+   <?> "expression"
   where
+    app :: Parser expr
+    app = appE <$> identifier <*> expr <?> "function application"
+
     simplInterp :: [Either T.Text (ExprVar expr)] -> expr
     simplInterp pieces =
         case contract pieces of
@@ -239,9 +248,7 @@ varNoWhitespace = do
     rxCapIndex = do
         digits <- many1 (digitToInt <$> digit)
 
-        if digits == [0]
-          then unexpected "regex capture index 0"
-          else return $ foldl' (\acc x -> acc*10 + x) 0 digits - 1
+        return $ foldl' (\acc x -> acc*10 + x) 0 digits
 
     ident = do
         c  <- Tok.identStart langDef

@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -8,16 +9,12 @@ module System.Posix.Find.Lang.Types where
 
 import Data.Int (Int64)
 
-import Control.Monad.IO.Class
-import Control.Monad.Except
-import Control.Monad.State
-
 import qualified Data.Text as T
 
 import Data.Text.ICU.Regex (Regex)
 
+import System.Posix.Text.Path (RawPath)
 import System.Posix.Find.Types
-import System.Posix.Text.Path
 
 
 -- enable both AST debugging and fusing parsing/analysis (see Eval.hs)
@@ -35,8 +32,10 @@ class (IsLit (ExprLit expr), IsVar (ExprVar expr)) => IsExpr expr where
     type ExprLit expr
     type ExprVar expr
 
-    litE    :: ExprLit expr                   -> expr
-    varE    :: ExprVar expr                   -> expr
+    litE    :: ExprLit expr -> expr
+    varE    :: ExprVar expr -> expr
+    appE    :: Name -> expr -> expr
+
     interpE :: [Either T.Text (ExprVar expr)] -> expr
 
 class IsExpr (PredExpr pre) => IsPred pre where
@@ -56,7 +55,8 @@ class IsExpr (PredExpr pre) => IsPred pre where
 data Value = BoolV   !Bool
            | NumV    !Int64
            | StringV !T.Text
-           | forall t. IsPathType t => NodeV !(FSNode t 'Resolved)
+           | NodeV   !(FSAnyNode 'Resolved)
+    deriving (Eq)
 
 data ValueType = TBool | TNum | TString | TNode
     deriving (Eq, Show)
@@ -68,6 +68,45 @@ data Lit = BoolL   !Bool
          | NumL    !Int64
          | StringL !T.Text
     deriving (Show)
+
+
+class IsValue a where
+    valueTypeOf :: p a -> ValueType
+    toValue     :: a -> Value
+    fromValue   :: Value -> Maybe a
+
+instance IsValue Bool where
+    valueTypeOf _ = TBool
+
+    toValue = BoolV
+
+    fromValue (BoolV b) = Just b
+    fromValue _         = Nothing
+
+instance IsValue Int64 where
+    valueTypeOf _ = TNum
+
+    toValue = NumV
+
+    fromValue (NumV x) = Just x
+    fromValue _        = Nothing
+
+instance IsValue T.Text where
+    valueTypeOf _ = TString
+
+    toValue = StringV
+
+    fromValue (StringV s) = Just s
+    fromValue _           = Nothing
+
+instance IsValue (FSAnyNode 'Resolved) where
+    valueTypeOf _ = TNode
+
+    toValue = NodeV
+
+    fromValue (NodeV n) = Just n
+    fromValue _         = Nothing
+
 
 typeOf :: Value -> ValueType
 typeOf (BoolV _)   = TBool
@@ -85,12 +124,15 @@ typeNameOf :: Value -> T.Text
 typeNameOf = typeName . typeOf
 
 
-data Var = NamedVar !T.Text
+type Name    = T.Text
+
+data Var = NamedVar !Name
          | RxCapVar !Int
     deriving (Eq, Show)
 
 data Expr = LitE    !Lit
           | VarE    !Var
+          | AppE    !Name !Expr
           | InterpE ![Either T.Text Var]
     deriving (Show)
 
@@ -122,18 +164,34 @@ instance IsExpr Expr where
     type ExprLit Expr = Lit
     type ExprVar Expr = Var
 
-    litE    = LitE
-    varE    = VarE
+    litE = LitE
+    varE = VarE
+    appE = AppE
     interpE = InterpE
 
 instance IsPred Pred where
     type PredExpr Pred = Expr
 
-    notP  = NotP
-    andP  = AndP
-    orP   = OrP
+    notP = NotP
+    andP = AndP
+    orP  = OrP
 
     exprP  = ExprP
     matchP = MatchP
     opP    = OpP
+
+
+-- TODO: error location info
+
+data VarNotFoundError = VarNotFound       !Var
+                      | CaptureOutOfRange !Int
+    deriving Show
+
+data RuntimeError = !T.Text `ExpectedButFound` !T.Text
+                  | NotFound !RawPath
+                  | InvalidPathOp !RawPath !T.Text
+    deriving Show
+
+expectedButFound :: ValueType -> ValueType -> RuntimeError
+t `expectedButFound` t' = typeName t `ExpectedButFound` typeName t'
 
