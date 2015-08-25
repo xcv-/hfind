@@ -126,10 +126,10 @@ skipNM p = skipF2M p p
 
 
 pruneDirs :: Monad m => (dp -> Bool) -> Transform fp dp m
-pruneDirs p = skipF2 (const False) p
+pruneDirs = skipF2 (const False)
 
 pruneDirsM :: Monad m => (dp -> m Bool) -> Transform fp dp m
-pruneDirsM p = skipF2M (const $ return False) p
+pruneDirsM = skipF2M (const $ return False)
 
 
 follow :: forall s s' t. (HasErrors s ~ HasErrors s') => FSNode t s -> FSNode t s'

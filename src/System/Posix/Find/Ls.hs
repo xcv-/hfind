@@ -50,7 +50,7 @@ followSymlinks = SymlinkStrategy discriminate
           let inode = Posix.fileID stat
 
           (visited', target) <- do
-              when (inode `elem` visited) $ do
+              when (inode `elem` visited) $
                   throwM (FSCycleError tpath)
 
               tdest <- T.decodeUtf8 <$> Posix.readSymbolicLink bpath

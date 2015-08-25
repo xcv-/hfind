@@ -23,7 +23,7 @@ import Control.Monad.Except
 import qualified Data.Text          as T
 import qualified Data.Text.Encoding as T
 
-import qualified Data.Text.ICU.Regex as Regex
+import qualified Data.Text.ICU as ICU
 
 import qualified System.Posix.ByteString as Posix
 
@@ -139,7 +139,7 @@ instance IsPred PredScan where
     andP (PredScan mp1) (PredScan mp2) = PredScan $ do
         (!p1) <- mp1
         (!p2) <- mp2
-        return $! \n -> do
+        return $ \n -> do
             r <- p1 n
             if r
               then p2 n
@@ -150,7 +150,7 @@ instance IsPred PredScan where
         -- in the future we may want to intersect all possible results
         (!p1) <- readonly mp1
         (!p2) <- readonly mp2
-        return $! \n -> do
+        return $ \n -> do
             r <- p1 n
             if r
               then return True
@@ -158,7 +158,7 @@ instance IsPred PredScan where
 
     exprP (ExprScan me) = PredScan $ do
         (!e) <- me
-        return $! \n -> do
+        return $ \n -> do
             val <- e n
             case val of
                 BoolV b -> return b
@@ -204,14 +204,11 @@ instance IsPred PredScan where
         (!e) <- me
         updateNumCaptures capMode rx
 
-        return $! \n -> do
-            val <- e n
+        return $ \n -> do
+            s <- coerceToString <$> e n
 
-            case val of
-                StringV s -> do
-                    liftIO $ Regex.setText rx s
-                    matches <- liftIO $ Regex.find rx 0
-                    setCaptures capMode rx s
-                    return matches
-
-                v -> throwError $ TString `expectedButFound` typeOf v
+            case ICU.find rx s of
+                Nothing    -> return False
+                Just match -> do
+                    setCaptures capMode match
+                    return True

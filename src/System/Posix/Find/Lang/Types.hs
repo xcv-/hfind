@@ -11,7 +11,7 @@ import Data.Int (Int64)
 
 import qualified Data.Text as T
 
-import Data.Text.ICU.Regex (Regex)
+import Data.Text.ICU (Regex)
 
 import System.Posix.Text.Path (RawPath)
 import System.Posix.Find.Types

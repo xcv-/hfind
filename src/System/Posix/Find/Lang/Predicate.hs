@@ -1,8 +1,9 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 module System.Posix.Find.Lang.Predicate
-  ( DirPredicate(..)
-  , EntryPredicate(..)
+  ( DirPredicate
+  , EntryPredicate
   , parsePrunePredicate
   , parseFilterPredicate
   ) where
@@ -12,27 +13,39 @@ import Control.Monad.Morph
 
 import qualified Data.Text as T
 
-import System.Posix.Find.Lang.Context
-import System.Posix.Find.Lang.Eval (runPredScan)
-import System.Posix.Find.Lang.Parser
-import System.Posix.Find.Types (ListEntry(..), FSAnyNode(..))
+import System.Posix.Text.Path (Dir)
+
+import System.Posix.Find.Lang.Context (ScanT, EvalT)
+import System.Posix.Find.Lang.Eval    (runPredScan)
+import System.Posix.Find.Lang.Parser  (parsePred)
+import System.Posix.Find.Types        (FSNodeType(Resolved), FSNode(..),
+                                       FSAnyNode(..),
+                                       ListEntry(..), NodeListEntry)
+
+
+type NodePredicate  = FSAnyNode     'Resolved -> EvalT IO Bool
+type DirPredicate   = FSNode Dir    'Resolved -> EvalT IO Bool
+type EntryPredicate = NodeListEntry 'Resolved -> EvalT IO Bool
+
+
+parseNodePredicate :: String -> ScanT (ExceptT String IO) NodePredicate
+parseNodePredicate s =
+    case parsePred s (T.pack s) of
+        Right mp -> hoist lift (runPredScan mp)
+        Left err -> lift $ throwError (show err)
 
 
 parsePrunePredicate :: String -> ScanT (ExceptT String IO) DirPredicate
 parsePrunePredicate s = do
-    p <- parseFilterPredicate s
+    p <- parseNodePredicate s
 
-    return (DirPredicate (\n -> evalEntryPredicate p (DirEntry n)))
+    return (p . AnyNode)
 
 
 parseFilterPredicate :: String -> ScanT (ExceptT String IO) EntryPredicate
 parseFilterPredicate s = do
-    r <- liftIO $ parsePred s (T.pack s)
+    p <- parseNodePredicate s
 
-    case r of
-        Right mp -> do
-            p <- hoist lift (runPredScan mp)
-            return $ EntryPredicate $ \case
-                DirEntry n  -> p (AnyNode n)
-                FileEntry n -> p (AnyNode n)
-        Left err -> lift $ throwError (show err)
+    return $ \case
+        DirEntry n  -> p (AnyNode n)
+        FileEntry n -> p (AnyNode n)

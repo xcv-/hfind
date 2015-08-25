@@ -8,9 +8,9 @@ import GHC.Exts (IsString(..))
 import Data.Either
 import Data.Monoid
 
-import qualified Data.Text.ICU.Regex as Regex
+import qualified Data.Text.ICU as ICU
 
-import Text.RawString.QQ
+import Text.RawString.QQ (r)
 
 import SpecHelper
 
@@ -40,7 +40,7 @@ instance Eq Pred where
     ExprP a      == ExprP b         = a == b
     OpP o a b    == OpP o' c d      = o == o' && a == c && b == d
     MatchP s r c == MatchP s' r' c' = s == s' && c == c'
-                                     && Regex.pattern r == Regex.pattern r'
+                                     && ICU.pattern r == ICU.pattern r'
     _         == _          = False
 
 spec = do
@@ -60,121 +60,119 @@ spec = do
     let ivar n = Right (NamedVar n)
         irxc i = Right (RxCapVar i)
 
-    let shouldSatisfyF m p = (p <$> m) `shouldReturn` True
-
     describe "System.Posix.Find.Lang.Parser" $ do
         context "exprParser" $ do
             it "parses variables" $ do
-                parseE [r|$var123|] `shouldReturn`
+                parseE [r|$var123|] `shouldBe`
                     Right (var "var123")
 
-                parseE [r|${var123}|] `shouldReturn`
+                parseE [r|${var123}|] `shouldBe`
                     Right (var "var123")
 
-                parseE [r|$123|] `shouldReturn`
+                parseE [r|$123|] `shouldBe`
                     Right (rxc 123)
 
-                parseE [r|${123}|] `shouldReturn`
+                parseE [r|${123}|] `shouldBe`
                     Right (rxc 123)
 
-                parseE [r|$123var|]   `shouldSatisfyF` isLeft
-                parseE [r|${123}var|] `shouldSatisfyF` isLeft
+                parseE [r|$123var|]   `shouldSatisfy` isLeft
+                parseE [r|${123}var|] `shouldSatisfy` isLeft
 
             it "parses literals" $ do
-                parseE [r|true|]  `shouldReturn` Right true
-                parseE [r|false|] `shouldReturn` Right false
-                parseE [r|10|]    `shouldReturn` Right (num 10)
+                parseE [r|true|]  `shouldBe` Right true
+                parseE [r|false|] `shouldBe` Right false
+                parseE [r|10|]    `shouldBe` Right (num 10)
 
-                parseE [r|"asdf\"q$$wer"|] `shouldReturn`
+                parseE [r|"asdf\"q$$wer"|] `shouldBe`
                     Right "asdf\"q$wer"
 
             it "parses interpolations" $ do
-                parseE [r|"$2"|] `shouldReturn`
+                parseE [r|"$2"|] `shouldBe`
                     Right (InterpE [irxc 2])
 
-                parseE [r|"$var"|] `shouldReturn`
+                parseE [r|"$var"|] `shouldBe`
                     Right (InterpE [ivar "var"])
 
-                parseE [r|"test$1in\"terp"|] `shouldReturn`
+                parseE [r|"test$1in\"terp"|] `shouldBe`
                     Right (InterpE ["test", irxc 1, "in\"terp"])
 
-                parseE [r|"test${q}interp"|] `shouldReturn`
+                parseE [r|"test${q}interp"|] `shouldBe`
                     Right (InterpE ["test", ivar "q", "interp"])
 
-                parseE [r|"${var}test$$$3"|] `shouldReturn`
+                parseE [r|"${var}test$$$3"|] `shouldBe`
                     Right (InterpE [ivar "var", "test$", irxc 3])
 
             it "parses function applications" $ do
-                parseE [r|f g $v|] `shouldReturn`
+                parseE [r|f g $v|] `shouldBe`
                     Right (AppE "f" (AppE "g" (var "v")))
 
-                parseE [r|(f g) (g i)|] `shouldSatisfyF` isLeft
+                parseE [r|(f g) (g i)|] `shouldSatisfy` isLeft
 
 
         context "parsePred" $ do
             it "parses parenthesized predicates" $ do
-                parseP [r|( ( (   (false) ) ))|] `shouldReturn`
+                parseP [r|( ( (   (false) ) ))|] `shouldBe`
                     Right (ExprP false)
 
             it "parses any expression" $ do
-                parseP [r|true|] `shouldReturn` Right (ExprP true)
-                parseP [r|10|]   `shouldReturn` Right (ExprP (num 10))
-                parseP [r|$1|]   `shouldReturn` Right (ExprP (rxc 1))
+                parseP [r|true|] `shouldBe` Right (ExprP true)
+                parseP [r|10|]   `shouldBe` Right (ExprP (num 10))
+                parseP [r|$1|]   `shouldBe` Right (ExprP (rxc 1))
 
-                parseP [r|"asdf$q"|] `shouldReturn`
+                parseP [r|"asdf$q"|] `shouldBe`
                     Right (ExprP (InterpE ["asdf", ivar "q"]))
 
             it "parses negations" $ do
-                parseP [r|not(true)|] `shouldReturn`
+                parseP [r|not(true)|] `shouldBe`
                     Right (NotP (ExprP true))
 
-                parseP [r|not(((not(true))))|] `shouldReturn`
+                parseP [r|not(((not(true))))|] `shouldBe`
                     Right (NotP (NotP (ExprP true)))
 
-                parseP [r|not(57)|] `shouldReturn`
+                parseP [r|not(57)|] `shouldBe`
                     Right (NotP (ExprP (num 57)))
 
             it "parses operator application" $ do
-                parseP [r| 1 == 2 |] `shouldReturn`
+                parseP [r| 1 == 2 |] `shouldBe`
                     Right (OpP OpEQ (num 1) (num 2))
 
-                parseP [r| $1 == $x |] `shouldReturn`
+                parseP [r| $1 == $x |] `shouldBe`
                     Right (OpP OpEQ (rxc 1) (var "x"))
 
-                parseP [r| $size <= 1000 |] `shouldReturn`
+                parseP [r| $size <= 1000 |] `shouldBe`
                     Right (OpP OpLE (var "size") (num 1000))
 
-                parseP [r| $size < 1000 |] `shouldReturn`
+                parseP [r| $size < 1000 |] `shouldBe`
                     Right (OpP OpLT (var "size") (num 1000))
 
-                parseP [r| $size >= 1000 |] `shouldReturn`
+                parseP [r| $size >= 1000 |] `shouldBe`
                     Right (OpP OpGE (var "size") (num 1000))
 
-                parseP [r| $size > 1000 |] `shouldReturn`
+                parseP [r| $size > 1000 |] `shouldBe`
                     Right (OpP OpGT (var "size") (num 1000))
 
             it "parses complex regexes with escape sequences" $ do
                 let pat  = [r|^@(?:pat\w+\*?)*/\\[^!*\_\S]$|]
                     pat' = [r|^@(?:pat\w+\*?)*/\\[^!*_\S]$|]
 
-                rx <- Regex.regex [ Regex.CaseInsensitive, Regex.DotAll
-                                  , Regex.Multiline, Regex.Comments ]
-                                  pat'
+                let rx = ICU.regex [ ICU.CaseInsensitive, ICU.DotAll
+                                   , ICU.Multiline, ICU.Comments ]
+                                   pat'
 
-                parseP ("\"\" =~ m_" <> pat <> "_mxisn") `shouldReturn`
+                parseP ("\"\" =~ m_" <> pat <> "_mxisn") `shouldBe`
                     Right (MatchP (str "") rx NoCapture)
 
             it "parses unicode regexes" $ do
                 let pat = [r|\w\W\Sł€\S\s$|]
 
-                rx <- Regex.regex [Regex.CaseInsensitive, Regex.Comments] pat
+                let rx = ICU.regex [ICU.CaseInsensitive, ICU.Comments] pat
 
-                parseP (" $name =~ m#" <> pat <> "#ix ") `shouldReturn`
+                parseP (" $name =~ m#" <> pat <> "#ix ") `shouldBe`
                     Right (MatchP (var "name") rx Capture)
 
             it "parses and/or left-associatively" $ do
-                parseP [r| true && false || true |] `shouldReturn`
+                parseP [r| true && false || true |] `shouldBe`
                     Right ((trueP `AndP` falseP) `OrP` trueP)
 
-                parseP [r| true && not(false || true) && true |] `shouldReturn`
+                parseP [r| true && not(false || true) && true |] `shouldBe`
                     Right ((trueP `AndP` NotP (falseP `OrP` trueP)) `AndP` trueP)

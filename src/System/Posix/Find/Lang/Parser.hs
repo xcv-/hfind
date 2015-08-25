@@ -14,17 +14,17 @@ import Data.Functor.Identity
 import Data.Monoid
 import Data.List (foldl', partition)
 
-import Control.Monad.IO.Class
-
+import Data.Text (Text)
 import qualified Data.Text as T
 
-import Data.Text.ICU.Regex (Regex)
+import Data.Text.ICU (Regex)
+import qualified Data.Text.ICU       as ICU
 import qualified Data.Text.ICU.Error as ICU
-import qualified Data.Text.ICU.Regex as Regex
 
 import Text.Parsec
 import Text.Parsec.Expr
 import Text.Parsec.Pos
+import Text.Parsec.Text (Parser)
 import qualified Text.Parsec.Error as PE
 import qualified Text.Parsec.Prim  as Prim
 import qualified Text.Parsec.Token as Tok
@@ -32,17 +32,14 @@ import qualified Text.Parsec.Token as Tok
 import System.Posix.Find.Lang.Types
 
 
-parsePred :: IsPred pre => SourceName -> T.Text -> IO (Either ParseError pre)
-parsePred = runParserT (whitespace *> predicate <* eof) ()
+parsePred :: IsPred pre => SourceName -> Text -> Either ParseError pre
+parsePred = runParser (whitespace *> predicate <* eof) ()
 
-parseExpr :: IsExpr expr => SourceName -> T.Text -> IO (Either ParseError expr)
-parseExpr = runParserT (whitespace *> expr <* eof) ()
+parseExpr :: IsExpr expr => SourceName -> Text -> Either ParseError expr
+parseExpr = runParser (whitespace *> expr <* eof) ()
 
 
-type ParserT = ParsecT T.Text ()
-type Parser  = ParserT IO
-
-langDef :: Monad m => Tok.GenLanguageDef T.Text () m
+langDef :: Monad m => Tok.GenLanguageDef Text () m
 langDef = Tok.LanguageDef
   { Tok.commentStart = ""
   , Tok.commentEnd = ""
@@ -57,31 +54,31 @@ langDef = Tok.LanguageDef
   , Tok.caseSensitive = True
   }
 
-lang :: Monad m => Tok.GenTokenParser T.Text () m
+lang :: Monad m => Tok.GenTokenParser Text () m
 lang = Tok.makeTokenParser langDef
 
-whitespace :: Monad m => ParserT m ()
+whitespace :: Parser ()
 whitespace = Tok.whiteSpace lang
 
-identifier :: Monad m => ParserT m T.Text
+identifier :: Parser Text
 identifier = T.pack <$> Tok.identifier lang
 
-parens :: Monad m => ParserT m a -> ParserT m a
+parens :: Parser a -> Parser a
 parens = Tok.parens lang
 
-symbol :: Monad m => String -> ParserT m ()
+symbol :: String -> Parser ()
 symbol s = Tok.symbol lang s $> ()
 
-reserved :: Monad m => String -> ParserT m ()
+reserved :: String -> Parser ()
 reserved s = Tok.symbol lang s $> ()
 
-reservedOp :: Monad m => String -> ParserT m ()
+reservedOp :: String -> Parser ()
 reservedOp s = Tok.reservedOp lang s $> ()
 
-integerLiteral :: (Monad m, Num a) => ParserT m a
+integerLiteral :: Num a => Parser a
 integerLiteral = fromInteger <$> Tok.integer lang
 
-stringLiteral :: Monad m => ParserT m T.Text
+stringLiteral :: Parser Text
 stringLiteral = T.pack <$> Tok.stringLiteral lang
 
 
@@ -118,7 +115,7 @@ predicate = buildExpressionParser
       ]
     ] predicateValue
 
-comparator :: Monad m => ParserT m Op
+comparator :: Parser Op
 comparator = try (symbol "==" $> OpEQ)
          <|> try (symbol "<=" $> OpLE)
          <|> try (symbol ">=" $> OpGE)
@@ -137,14 +134,14 @@ expr = parens expr
     app :: Parser expr
     app = appE <$> identifier <*> expr <?> "function application"
 
-    simplInterp :: [Either T.Text (ExprVar expr)] -> expr
+    simplInterp :: [Either Text (ExprVar expr)] -> expr
     simplInterp pieces =
         case contract pieces of
           []       -> litE (stringL "")
           [Left s] -> litE (stringL s)
           pieces'  -> interpE pieces'
 
-    contract :: [Either T.Text (ExprVar expr)] -> [Either T.Text (ExprVar expr)]
+    contract :: [Either Text (ExprVar expr)] -> [Either Text (ExprVar expr)]
     contract [] = []
     contract (Left "" : ps) = contract ps
     contract (p:ps) =
@@ -152,12 +149,12 @@ expr = parens expr
           (Left s1, Left s2 : ps') -> Left (s1 <> s2) : ps'
           (_, ps')                 -> p:ps'
 
-    interp :: Parser [Either T.Text (ExprVar expr)]
+    interp :: Parser [Either Text (ExprVar expr)]
     interp = flip label "interpolated string" $
         either throwParseError return . parseInterp =<< stringLiteral
 
-    parseInterp :: T.Text -> Either (SourcePos -> ParseError)
-                                    [Either T.Text (ExprVar expr)]
+    parseInterp :: Text -> Either (SourcePos -> ParseError)
+                                    [Either Text (ExprVar expr)]
     parseInterp s =
         case T.break (=='$') s of
           (prefix, "") ->
@@ -174,7 +171,7 @@ expr = parens expr
                            (parseInterp s'')
                   Left e ->
                       let msg   = "Could not parse interpolated string"
-                          err p = foldl' (\e' m -> PE.addErrorMessage m e')
+                          err p = foldr PE.addErrorMessage
                                     (parseError msg p)
                                     (PE.errorMessages e)
                       in Left err
@@ -199,24 +196,22 @@ regex = flip label "regular expression" $ do
     pattern     <- T.pack . reverse <$> go [] False
     (cap, opts) <- regexOpts
 
-    erx <- liftIO $ Regex.regex' opts pattern
-
-    case erx of
+    case ICU.regex' opts pattern of
       Right rx -> return (rx, cap)
-      Left e   -> let err = parseError (ICU.errorName (Regex.errError e))
+      Left e   -> let err = parseError (ICU.errorName (ICU.errError e))
                   in throwParseError $ \pos ->
-                       case Regex.errOffset e of
+                       case ICU.errOffset e of
                          Just off -> err (incSourceColumn pos off)
                          Nothing  -> err pos
   where
-    regexOpts :: Parser (RxCaptureMode, [Regex.MatchOption])
+    regexOpts :: Parser (RxCaptureMode, [ICU.MatchOption])
     regexOpts = do
         opts <- many letter <* whitespace
 
-        let translate = \case 'm' -> return Regex.Multiline
-                              'x' -> return Regex.Comments
-                              's' -> return Regex.DotAll
-                              'i' -> return Regex.CaseInsensitive
+        let translate = \case 'm' -> return ICU.Multiline
+                              'x' -> return ICU.Comments
+                              's' -> return ICU.DotAll
+                              'i' -> return ICU.CaseInsensitive
                               c   -> unexpected ("regex option " ++ show c)
 
         case partition (/='n') opts of
@@ -229,12 +224,18 @@ litNoString = boolL True     <$  reserved "true"
           <|> boolL False    <$  reserved "false"
           <|> numL           <$> integerLiteral
           <?> "literal"
+  where
+    numLit = try date <|> try size <?> "numeric literal"
 
-var :: (Monad m, IsVar var) => ParserT m var
+    date = undefined
+    size = undefined
+
+
+var :: IsVar var => Parser var
 var = varNoWhitespace <* whitespace
   <?> "variable"
 
-varNoWhitespace :: (Monad m, IsVar var) => ParserT m var
+varNoWhitespace :: IsVar var => Parser var
 varNoWhitespace = do
     void (char '$')
 
@@ -259,10 +260,10 @@ varNoWhitespace = do
 
 -- low-level Text.Parsec.Prim-based utilities
 
-parseWithLeftovers :: ParserT Identity a
+parseWithLeftovers :: Parser a
                    -> SourceName
-                   -> T.Text
-                   -> Either ParseError (a, T.Text)
+                   -> Text
+                   -> Either ParseError (a, Text)
 parseWithLeftovers p srcName s = runIdentity $ do
     cons <- Prim.runParsecT p (State s (initialPos srcName) ())
 
@@ -279,7 +280,7 @@ parseError :: String -> SourcePos -> ParseError
 parseError msg = PE.newErrorMessage (PE.Message msg)
 
 
-throwParseError :: Monad m => (SourcePos -> ParseError) -> ParserT m a
+throwParseError :: (SourcePos -> ParseError) -> Parser a
 throwParseError err =
     Prim.mkPT $ \st ->
       let pos = Prim.statePos st

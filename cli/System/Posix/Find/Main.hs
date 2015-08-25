@@ -56,9 +56,7 @@ parseActions ("-if":expr:opts) = do
                       \list action (like -if)"
 
     return transforms {
-        listTransform =
-            P.filterM (evalEntryPredicate predicate)
-                >-> listTransform transforms
+        listTransform = P.filterM predicate >-> listTransform transforms
     }
 
 parseActions ("-prune":expr:opts) = do
@@ -67,9 +65,7 @@ parseActions ("-prune":expr:opts) = do
 
     return transforms {
         hasTreeTransforms = True,
-        treeTransform =
-            pruneDirsM (evalDirPredicate predicate)
-                >-> treeTransform transforms
+        treeTransform = pruneDirsM predicate >-> treeTransform transforms
     }
 
 parseActions (opt:_) = lift $ throwE ("Invalid action: " ++ opt)

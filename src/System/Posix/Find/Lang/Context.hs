@@ -1,5 +1,4 @@
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE RankNTypes #-}
@@ -10,12 +9,6 @@ module System.Posix.Find.Lang.Context
     , EvalT
     , runScanT
     , Evaluator(..)
-    -- predicates
-    , NodeFunc(..)
-    , FilePredicate(..)
-    , DirPredicate(..)
-    , NodePredicate(..)
-    , EntryPredicate(..)
     -- Scan
     , ScanConfig(..)
     , readonly
@@ -33,7 +26,6 @@ module System.Posix.Find.Lang.Context
     , setCaptures
     ) where
 
-import Control.Applicative
 import Control.Monad.IO.Class
 import Control.Monad.Catch (MonadThrow, MonadCatch)
 import Control.Monad.Except
@@ -42,20 +34,17 @@ import Control.Monad.State.Strict
 
 import Control.Monad.Morph
 
-import Data.List (findIndex)
+import Data.List (elemIndex)
 
 import qualified Data.Text          as T
-import qualified Data.Text.Foreign  as T
 
-import Data.Text.ICU.Regex (Regex)
-import qualified Data.Text.ICU.Regex as Regex
+import qualified Data.Text.ICU as ICU
 
 import Data.Vector.Mutable (IOVector)
 import qualified Data.Vector.Mutable as V
 
-import System.Posix.Text.Path (Path, Abs, File, Dir, IsPathType)
+import System.Posix.Text.Path (Path, Abs, Dir)
 
-import System.Posix.Find.Types
 import System.Posix.Find.Lang.Types
 
 import qualified System.Posix.Find.Lang.Builtins as Builtins
@@ -74,7 +63,7 @@ defScanContext = ScanContext [] 0 0
 
 data EvalContext = EvalContext
     { ctxValues      :: !(IOVector Value) -- reversed
-    , ctxActiveRegex :: !(Maybe (Regex, T.Text))  -- not reversed
+    , ctxActiveMatch :: !(Maybe ICU.Match)
     }
 
 defEvalContext :: Int -> IO EvalContext
@@ -146,28 +135,6 @@ runScanT root (ScanT m) = do
     return $ fmap (\a -> (a, run)) ma
 
 
-
--- polymorphic functions/predicates ---------------------------------
-
-newtype NodeFunc = NodeFunc
-    { evalNodeFunc :: forall t. IsPathType t
-                   => FSNode t 'Resolved -> EvalT IO Value }
-
-newtype FilePredicate = FilePredicate
-    { evalFilePredicate :: FSNode File 'Resolved -> EvalT IO Bool }
-
-newtype DirPredicate = DirPredicate
-    { evalDirPredicate :: FSNode Dir 'Resolved -> EvalT IO Bool }
-
-newtype NodePredicate = NodePredicate
-    { evalNodePredicate :: forall t. IsPathType t
-                        => FSNode t 'Resolved -> EvalT IO Bool }
-
-newtype EntryPredicate = EntryPredicate
-    { evalEntryPredicate :: NodeListEntry 'Resolved -> EvalT IO Bool }
-
-
-
 -- Scan primitives --------------------------------------------------
 
 readonly :: Monad m => ScanT m a -> ScanT m a
@@ -181,7 +148,7 @@ readonly (ScanT m) = ScanT $ do
 addVar :: Name -> Scan VarId
 addVar name = ScanT $ do
     modify $ \ctx ->
-      ctx { ctxVars       = (name : ctxVars ctx)
+      ctx { ctxVars       = name : ctxVars ctx
           , ctxNumVars    = 1 + ctxNumVars ctx
           }
     gets (VarId . ctxNumVars)
@@ -190,10 +157,10 @@ addVar name = ScanT $ do
 getNumCaptures :: Scan Int
 getNumCaptures = ScanT $ gets ctxNumCaptures
 
-updateNumCaptures :: RxCaptureMode -> Regex -> Scan ()
+updateNumCaptures :: RxCaptureMode -> ICU.Regex -> Scan ()
 updateNumCaptures NoCapture _  = return ()
 updateNumCaptures Capture   rx = ScanT $ do
-    numCaptures <- liftIO $ Regex.groupCount rx
+    let numCaptures = ICU.groupCount rx
 
     -- +1 because the full pattern is $0
     modify $ \ctx -> ctx { ctxNumCaptures = numCaptures+1 }
@@ -202,7 +169,7 @@ getVarId :: Name -> Scan (Maybe VarId)
 getVarId name = ScanT $ do
     vars <- gets ctxVars
 
-    return $ VarId <$> findIndex (==name) vars
+    return $ VarId <$> elemIndex name vars
 
 
 lookupBuiltinVar :: Name -> Scan (Maybe BuiltinVar)
@@ -233,21 +200,16 @@ setVarValue (VarId i) val = EvalT $ do
 
 getCaptureValue :: Int -> Eval T.Text
 getCaptureValue i = EvalT $ do
-    Just (rx, text) <- gets ctxActiveRegex
+    Just match <- gets ctxActiveMatch
 
-    mstart <- liftIO $ Regex.start rx i
-    mend   <- liftIO $ Regex.end   rx i
-
-    case liftA2 (,) mstart mend of
-        Just (start, end) ->
-            return $ T.dropWord16 (start-1) (T.takeWord16 end text)
+    case ICU.group i match of
+        Just text -> return text
         Nothing ->
-            let pat = Regex.pattern rx in
             error $ "getCaptureValue: could not find $" ++ show i
-                      ++ " of " ++ T.unpack pat
+                      ++ " of " ++ T.unpack (ICU.pattern match)
 
 
-setCaptures :: RxCaptureMode -> Regex -> T.Text -> Eval ()
-setCaptures NoCapture _  _ = return ()
-setCaptures Capture   rx t = EvalT $ do
-    modify $ \ctx -> ctx { ctxActiveRegex = Just (rx, t) }
+setCaptures :: RxCaptureMode -> ICU.Match -> Eval ()
+setCaptures NoCapture _     = return ()
+setCaptures Capture   match = EvalT $
+    modify $ \ctx -> ctx { ctxActiveMatch = Just match }
