@@ -24,21 +24,23 @@ instance Eq Lit where
     BoolL a    == BoolL b      = a == b
     NumL a     == NumL b       = a == b
     StringL a  == StringL b    = a == b
-    RegexL r c == RegexL r' c' = Regex.pattern r == Regex.pattern r' && c == c'
     _          == _            = False
 
 instance Eq Expr where
     LitE a    == LitE b    = a == b
     VarE a    == VarE b    = a == b
     InterpE a == InterpE b = a == b
+    AppE f x  == AppE g y  = f == g && x == y
     _         == _         = False
 
 instance Eq Pred where
-    NotP a    == NotP b     = a == b
-    AndP a b  == AndP c d   = a == c && b == d
-    OrP a b   == OrP c d    = a == c && b == d
-    ExprP a   == ExprP b    = a == b
-    OpP o a b == OpP o' c d = o == o' && a == c && b == d
+    NotP a       == NotP b          = a == b
+    AndP a b     == AndP c d        = a == c && b == d
+    OrP a b      == OrP c d         = a == c && b == d
+    ExprP a      == ExprP b         = a == b
+    OpP o a b    == OpP o' c d      = o == o' && a == c && b == d
+    MatchP s r c == MatchP s' r' c' = s == s' && c == c'
+                                     && Regex.pattern r == Regex.pattern r'
     _         == _          = False
 
 spec = do
@@ -48,6 +50,7 @@ spec = do
     let true   = LitE (BoolL True)
         false  = LitE (BoolL False)
         num i  = LitE (NumL  i)
+        str s  = LitE (StringL s)
         var n  = VarE (NamedVar n)
         rxc i  = VarE (RxCapVar i)
 
@@ -56,10 +59,6 @@ spec = do
 
     let ivar n = Right (NamedVar n)
         irxc i = Right (RxCapVar i)
-
-        rxIs pat c = \case Right (LitE (RegexL rx cap))
-                             | Regex.pattern rx == pat && c == cap -> True
-                           _ -> False
 
     let shouldSatisfyF m p = (p <$> m) `shouldReturn` True
 
@@ -73,10 +72,10 @@ spec = do
                     Right (var "var123")
 
                 parseE [r|$123|] `shouldReturn`
-                    Right (rxc 122)
+                    Right (rxc 123)
 
                 parseE [r|${123}|] `shouldReturn`
-                    Right (rxc 122)
+                    Right (rxc 123)
 
                 parseE [r|$123var|]   `shouldSatisfyF` isLeft
                 parseE [r|${123}var|] `shouldSatisfyF` isLeft
@@ -89,31 +88,28 @@ spec = do
                 parseE [r|"asdf\"q$$wer"|] `shouldReturn`
                     Right "asdf\"q$wer"
 
-                let pat   = [r|^@(?:pat\w+\*?)*/\\[^!*\_\S]$|]
-                    pat'  = [r|^@(?:pat\w+\*?)*/\\[^!*_\S]$|]
-
-                rx <- Regex.regex [ Regex.CaseInsensitive, Regex.DotAll
-                                  , Regex.Multiline, Regex.Comments ]
-                                  pat'
-
-                parseE ("m_" <> pat <> "_mxisn") `shouldReturn`
-                    Right (LitE (RegexL rx NoCapture))
-
             it "parses interpolations" $ do
                 parseE [r|"$2"|] `shouldReturn`
-                    Right (InterpE [irxc 1])
+                    Right (InterpE [irxc 2])
 
                 parseE [r|"$var"|] `shouldReturn`
                     Right (InterpE [ivar "var"])
 
                 parseE [r|"test$1in\"terp"|] `shouldReturn`
-                    Right (InterpE ["test", irxc 0, "in\"terp"])
+                    Right (InterpE ["test", irxc 1, "in\"terp"])
 
                 parseE [r|"test${q}interp"|] `shouldReturn`
                     Right (InterpE ["test", ivar "q", "interp"])
 
                 parseE [r|"${var}test$$$3"|] `shouldReturn`
-                    Right (InterpE [ivar "var", "test$", irxc 2])
+                    Right (InterpE [ivar "var", "test$", irxc 3])
+
+            it "parses function applications" $ do
+                parseE [r|f g $v|] `shouldReturn`
+                    Right (AppE "f" (AppE "g" (var "v")))
+
+                parseE [r|(f g) (g i)|] `shouldSatisfyF` isLeft
+
 
         context "parsePred" $ do
             it "parses parenthesized predicates" $ do
@@ -123,7 +119,7 @@ spec = do
             it "parses any expression" $ do
                 parseP [r|true|] `shouldReturn` Right (ExprP true)
                 parseP [r|10|]   `shouldReturn` Right (ExprP (num 10))
-                parseP [r|$1|]   `shouldReturn` Right (ExprP (rxc 0))
+                parseP [r|$1|]   `shouldReturn` Right (ExprP (rxc 1))
 
                 parseP [r|"asdf$q"|] `shouldReturn`
                     Right (ExprP (InterpE ["asdf", ivar "q"]))
@@ -143,7 +139,7 @@ spec = do
                     Right (OpP OpEQ (num 1) (num 2))
 
                 parseP [r| $1 == $x |] `shouldReturn`
-                    Right (OpP OpEQ (rxc 0) (var "x"))
+                    Right (OpP OpEQ (rxc 1) (var "x"))
 
                 parseP [r| $size <= 1000 |] `shouldReturn`
                     Right (OpP OpLE (var "size") (num 1000))
@@ -157,12 +153,24 @@ spec = do
                 parseP [r| $size > 1000 |] `shouldReturn`
                     Right (OpP OpGT (var "size") (num 1000))
 
+            it "parses complex regexes with escape sequences" $ do
+                let pat  = [r|^@(?:pat\w+\*?)*/\\[^!*\_\S]$|]
+                    pat' = [r|^@(?:pat\w+\*?)*/\\[^!*_\S]$|]
+
+                rx <- Regex.regex [ Regex.CaseInsensitive, Regex.DotAll
+                                  , Regex.Multiline, Regex.Comments ]
+                                  pat'
+
+                parseP ("\"\" =~ m_" <> pat <> "_mxisn") `shouldReturn`
+                    Right (MatchP (str "") rx NoCapture)
+
+            it "parses unicode regexes" $ do
                 let pat = [r|\w\W\Sł€\S\s$|]
 
                 rx <- Regex.regex [Regex.CaseInsensitive, Regex.Comments] pat
 
                 parseP (" $name =~ m#" <> pat <> "#ix ") `shouldReturn`
-                    Right (OpP OpRX (var "name") (LitE (RegexL rx Capture)))
+                    Right (MatchP (var "name") rx Capture)
 
             it "parses and/or left-associatively" $ do
                 parseP [r| true && false || true |] `shouldReturn`

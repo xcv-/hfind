@@ -121,7 +121,7 @@ spec = do
             let shallow = adir "/a/"
                 deep    = adir "/a/b/c/d/"
 
-            let file = Right . afile
+            let file = Just . afile
 
             it "appends the relative path" $ do
                 canonicalizeUnder shallow "x/y"  `shouldBe` file "/a/x/y"
@@ -147,14 +147,14 @@ spec = do
                 deepF    = adir "/a/b/c/d"
                 deepD    = adir "/a/b/c/d/"
 
-            let file = Right . unsafeAbsFile
+            let file = Just . unsafeAbsFile
 
             it "works at the root" $ do
                 canonicalizeBeside shallowF "b" `shouldBe` file "/b"
                 canonicalizeBeside shallowD "b" `shouldBe` file "/b"
 
             it "doesn't go further than '/'" $ do
-                canonicalizeBeside root "a"   `shouldSatisfy` isLeft
+                canonicalizeBeside root "a"   `shouldBe` Nothing
 
             it "works with relative, non-normalized paths" $ do
                 canonicalizeBeside deepF "..///././z/../y/" `shouldBe` file "/a/b/y"
