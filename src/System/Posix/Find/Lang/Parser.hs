@@ -180,7 +180,7 @@ expr = parens expr
 regex :: Parser (Regex, RxCaptureMode)
 regex = flip label "regular expression" $ do
     void (char 'm')
-    delim <- oneOf "/_@%#!€$"
+    delim <- oneOf "/_@%#!€$,;:|"
 
     let go acc escaped = do
           c <- anyChar

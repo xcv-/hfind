@@ -80,9 +80,9 @@ mkBuiltins root =
     funcs = H.fromList
         [ ("stat",        erase fn_stat)
         , ("exists",      erase fn_exists)
-        , ("is_file",     erase fn_isfile)
-        , ("is_dir",      erase fn_isdir)
-        , ("is_link",     erase fn_islink)
+        , ("isfile",      erase fn_isfile)
+        , ("isdir",       erase fn_isdir)
+        , ("islink",      erase fn_islink)
         , ("type",        erase fn_type)
         , ("hidden",      erase fn_hidden)
         , ("name",        erase fn_name)
