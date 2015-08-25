@@ -1,4 +1,4 @@
-pipes-find
+hfind
 ==========
 
 Filtering and pruning by name already works!
