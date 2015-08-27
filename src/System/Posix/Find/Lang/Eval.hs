@@ -1,3 +1,4 @@
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -7,17 +8,15 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE BangPatterns #-}
 module System.Posix.Find.Lang.Eval
-  ( LitScan,  runLitScan
-  , VarScan,  runVarScan
-  , ExprScan, runExprScan
-  , PredScan, runPredScan
+  ( LitBaker,  runLitBaker
+  , VarBaker,  runVarBaker
+  , ExprBaker, runExprBaker
+  , PredBaker, runPredBaker
   ) where
 
-import Data.Int
 import Data.Monoid
 
 import Control.Applicative
-import Control.Monad.IO.Class
 import Control.Monad.Except
 
 import qualified Data.Text          as T
@@ -25,23 +24,23 @@ import qualified Data.Text.Encoding as T
 
 import qualified Data.Text.ICU as ICU
 
-import qualified System.Posix.ByteString as Posix
-
 import qualified System.Posix.Text.Path as Path
 
-import System.Posix.Find.Types
+import System.Posix.Find.Types (FSAnyNode(..), FSNodeType(..), nodePath)
 
 import System.Posix.Find.Lang.Types
-import System.Posix.Find.Lang.Context
+
+import System.Posix.Find.Lang.Context (Baker, Eval)
+import qualified System.Posix.Find.Lang.Context as Ctx
 
 
-type EvalValue = FSAnyNode 'Resolved -> EvalT IO Value
-type EvalBool  = FSAnyNode 'Resolved -> EvalT IO Bool
+type EvalValue = FSAnyNode 'Resolved -> Eval Value
+type EvalBool  = FSAnyNode 'Resolved -> Eval Bool
 
-newtype LitScan  = LitScan  { runLitScan  :: ScanT IO Lit       }
-newtype VarScan  = VarScan  { runVarScan  :: ScanT IO EvalValue }
-newtype ExprScan = ExprScan { runExprScan :: ScanT IO EvalValue }
-newtype PredScan = PredScan { runPredScan :: ScanT IO EvalBool  }
+newtype LitBaker  = LitBaker  { runLitBaker  :: Baker Value     }
+newtype VarBaker  = VarBaker  { runVarBaker  :: Baker EvalValue }
+newtype ExprBaker = ExprBaker { runExprBaker :: Baker EvalValue }
+newtype PredBaker = PredBaker { runPredBaker :: Baker EvalBool  }
 
 
 coerceToString :: Value -> T.Text
@@ -59,64 +58,59 @@ litValue (NumL    n) = NumV    n
 litValue (StringL s) = StringV s
 
 
-instance IsLit LitScan where
-    boolL      = LitScan . return . BoolL
-    numL       = LitScan . return . NumL
-    stringL    = LitScan . return . StringL
+instance IsLit LitBaker where
+    boolL      = LitBaker . return . BoolV
+    numL       = LitBaker . return . NumV
+    stringL    = LitBaker . return . StringV
 
-instance IsVar VarScan where
-    namedVar name = VarScan $
-        lookupBuiltinVar name >>= \case
-            -- it's built-in variable
+instance IsVar VarBaker where
+    namedVar name = VarBaker $
+        Ctx.lookupBuiltinVar name >>= \case
+            -- it's a built-in variable
             Just b  -> return b
 
-            Nothing -> lookupBuiltinFunc name >>= \case
-                -- $f is sugar for f <<current node>>
+            Nothing -> Ctx.lookupBuiltinFunc name >>= \case
+                -- $f is sugar for f $currentnode
                 Just f  -> return (f . NodeV)
 
-                Nothing -> getVarId name >>= \case
+                Nothing -> Ctx.getVarId name >>= \case
                     -- a manually defined variable
-                    Just i -> return (\_ -> getVarValue i)
+                    Just i -> return (\_ -> Ctx.getVarValue i)
 
                     -- fall back to environment variables
                     Nothing -> do
-                        let bname = T.encodeUtf8 name
+                        Ctx.lookupEnv (T.encodeUtf8 name) >>= \case
+                            Just value -> return (\_ -> return value)
+                            Nothing    -> throwError (VarNotFound (namedVar name))
 
-                        liftIO (Posix.getEnv bname) >>= \case
-                            Just bvalue -> do
-                                let !value = T.decodeUtf8 bvalue
-                                return (\_ -> return (StringV value))
-                            Nothing ->
-                                throwError (VarNotFound (namedVar name))
-
-    rxCapVar i = VarScan $ do
-        ncap <- getNumCaptures
+    rxCapVar i = VarBaker $ do
+        ncap <- Ctx.getNumCaptures
         if i < ncap
-          then return (\_ -> StringV <$> getCaptureValue i)
+          then return (\_ -> StringV <$> Ctx.getCaptureValue i)
           else throwError (VarNotFound (rxCapVar i))
 
 
-instance IsExpr ExprScan where
-    type ExprLit ExprScan = LitScan
-    type ExprVar ExprScan = VarScan
+instance IsExpr ExprBaker where
+    type ExprLit ExprBaker = LitBaker
+    type ExprVar ExprBaker = VarBaker
 
-    litE (LitScan ml) = ExprScan $ do
-        (!val) <- litValue <$> ml
-        return (\_ -> return val)
+    litE (LitBaker mv) = ExprBaker $ do
+        (!v) <- mv
+        return (\_ -> return v)
 
-    varE (VarScan mv) = ExprScan mv
+    varE (VarBaker mv) = ExprBaker mv
 
-    appE fname (ExprScan me) = ExprScan $ do
+    appE fname (ExprBaker me) = ExprBaker $ do
         (!e) <- me
 
-        lookupBuiltinFunc fname >>= \case
+        Ctx.lookupBuiltinFunc fname >>= \case
             Just f  -> return (f <=< e)
             Nothing -> throwError (VarNotFound (namedVar fname))
 
 
-    interpE pieces = ExprScan $ do
+    interpE pieces = ExprBaker $ do
         values <- forM pieces $ \case
-                      Right (VarScan mv) -> Right <$> mv
+                      Right (VarBaker mv) -> Right <$> mv
                       Left text          -> return (Left text)
 
         return $ \n -> do
@@ -128,15 +122,15 @@ instance IsExpr ExprScan where
         toString n (Right e) = coerceToString <$> e n
 
 
-instance IsPred PredScan where
-    type PredExpr PredScan = ExprScan
+instance IsPred PredBaker where
+    type PredExpr PredBaker = ExprBaker
 
-    notP (PredScan mp) = PredScan $ do
+    notP (PredBaker mp) = PredBaker $ do
         -- negative predicates cannot add things to scope
-        (!p) <- readonly mp
-        return $! (fmap not . p)
+        (!p) <- Ctx.readonly mp
+        return $! fmap not . p
 
-    andP (PredScan mp1) (PredScan mp2) = PredScan $ do
+    andP (PredBaker mp1) (PredBaker mp2) = PredBaker $ do
         (!p1) <- mp1
         (!p2) <- mp2
         return $ \n -> do
@@ -145,18 +139,18 @@ instance IsPred PredScan where
               then p2 n
               else return False
 
-    orP (PredScan mp1) (PredScan mp2) = PredScan $ do
+    orP (PredBaker mp1) (PredBaker mp2) = PredBaker $ do
         -- we don't know which one will be accepted yet
         -- in the future we may want to intersect all possible results
-        (!p1) <- readonly mp1
-        (!p2) <- readonly mp2
+        (!p1) <- Ctx.readonly mp1
+        (!p2) <- Ctx.readonly mp2
         return $ \n -> do
             r <- p1 n
             if r
               then return True
               else p2 n
 
-    exprP (ExprScan me) = PredScan $ do
+    exprP (ExprBaker me) = PredBaker $ do
         (!e) <- me
         return $ \n -> do
             val <- e n
@@ -165,15 +159,13 @@ instance IsPred PredScan where
                 _       -> throwError $
                   typeName TBool `ExpectedButFound` typeNameOf val
 
-    opP op (ExprScan me1) (ExprScan me2) = PredScan $ do
+    opP op (ExprBaker me1) (ExprBaker me2) = PredBaker $ do
         (!e1) <- me1
         (!e2) <- me2
 
-        let eval :: FSAnyNode 'Resolved -> EvalT IO (Value, Value)
-            eval n = liftA2 (,) (e1 n) (e2 n)
+        let eval n = liftA2 (,) (e1 n) (e2 n)
 
-        let evalNumeric :: FSAnyNode 'Resolved -> EvalT IO (Int64, Int64)
-            evalNumeric = eval >=> expect TNum TNum >=> \case
+        let evalNumeric = eval >=> expect TNum TNum >=> \case
                 (NumV a, NumV b) -> return (a, b)
                 _ -> error "System.Posix.Find.Lang.Eval.evalNumeric"
 
@@ -193,16 +185,15 @@ instance IsPred PredScan where
                 OpGT -> evalNumeric >=> \(a, b) -> return (a > b)
                 OpGE -> evalNumeric >=> \(a, b) -> return (a >= b)
       where
-        expect :: ValueType -> ValueType
-               -> (Value, Value) -> EvalT IO (Value, Value)
+        expect :: ValueType -> ValueType -> (Value, Value) -> Eval (Value, Value)
         expect t1 t2 (a, b)
           | t1 /= typeOf a = throwError $ t1 `expectedButFound` typeOf a
           | t2 /= typeOf b = throwError $ t2 `expectedButFound` typeOf b
           | otherwise      = return (a,b)
 
-    matchP (ExprScan me) rx capMode = PredScan $ do
+    matchP (ExprBaker me) rx capMode = PredBaker $ do
         (!e) <- me
-        updateNumCaptures capMode rx
+        Ctx.updateNumCaptures capMode rx
 
         return $ \n -> do
             s <- coerceToString <$> e n
@@ -210,5 +201,5 @@ instance IsPred PredScan where
             case ICU.find rx s of
                 Nothing    -> return False
                 Just match -> do
-                    setCaptures capMode match
+                    Ctx.setCaptures capMode match
                     return True

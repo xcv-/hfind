@@ -5,36 +5,55 @@
 {-# LANGUAGE TypeFamilies #-}
 module System.Posix.Find.Main (main) where
 
-import Control.Monad (when)
-import Control.Monad.Trans.Except
+import Control.Monad              (when)
+import Control.Monad.Trans        (lift)
+import Control.Monad.Trans.Except (ExceptT, Except, runExceptT, throwE)
+import Control.Monad.Morph        (hoist, generalize)
+import Control.Monad.IO.Class     (liftIO)
 
 import qualified Data.Text as T
 
-import System.Environment
-import System.Exit
+import System.Environment (getArgs)
+import System.Exit        (die)
 
-import qualified Pipes.Prelude as P
+import Pipes ((>->))
+import qualified Pipes         as Pipes
+import qualified Pipes.Prelude as Pipes
 
-import System.Posix.Find
-import System.Posix.Find.Lang.Context (ScanT, runScanT, EvalT, runEvalT,
+import System.Posix.Text.Path (Path, Abs, Dir,
+                               asDirPath, canonicalizeFromHere)
+
+import qualified System.Posix.Find.Walk        as Walk
+import qualified System.Posix.Find.Combinators as C
+
+import System.Posix.Find.Lang.Context (BakerT, runBakerT, Eval, runEvalT,
                                        Evaluator)
+
+import System.Posix.Find.Lang.Predicate (parseFilterPredicate,
+                                         parsePrunePredicate)
 
 import Text.RawString.QQ (r)
 
 
-type EntryTransform m = Pipe (NodeListEntry 'Resolved) (NodeListEntry 'Resolved) m ()
-
 data Transforms = Transforms
-    { treeTransform     :: !(TransformR     (EvalT IO))
-    , listTransform     :: !(EntryTransform (EvalT IO))
+    { treeTransform     :: !(C.TransformR      Eval)
+    , listTransform     :: !(C.EntryTransformR Eval)
     , hasTreeTransforms :: !Bool
     }
+
+
+checkHelpArg :: [String] -> IO ()
+checkHelpArg args = do
+    when ("-h" `elem` args || "--help" `elem` args) $
+        die usage
+
 
 parseLinkStratArg :: [String] -> (Bool, [String])
 parseLinkStratArg args =
     case args of
         "-L":args' -> (True,  args')
         args'      -> (False, args')
+
 
 parsePathArg :: [String] -> ExceptT String IO (Path Abs Dir, [String])
 parsePathArg [] = throwE "Expected search path"
@@ -46,7 +65,7 @@ parsePathArg (path:args') = do
         Nothing -> throwE $ "Invalid path: " ++ path
 
 
-parseActions :: [String] -> ScanT (ExceptT String IO) Transforms
+parseActions :: [String] -> BakerT (Except String) Transforms
 parseActions ("-if":expr:opts) = do
     predicate  <- parseFilterPredicate expr
     transforms <- parseActions opts
@@ -56,7 +75,7 @@ parseActions ("-if":expr:opts) = do
                       \list action (like -if)"
 
     return transforms {
-        listTransform = P.filterM predicate >-> listTransform transforms
+        listTransform = Pipes.filterM predicate >-> listTransform transforms
     }
 
 parseActions ("-prune":expr:opts) = do
@@ -65,57 +84,51 @@ parseActions ("-prune":expr:opts) = do
 
     return transforms {
         hasTreeTransforms = True,
-        treeTransform = pruneDirsM predicate >-> treeTransform transforms
+        treeTransform = C.pruneDirsM predicate >-> treeTransform transforms
     }
 
 parseActions (opt:_) = lift $ throwE ("Invalid action: " ++ opt)
-parseActions []      = return (Transforms cat cat False)
+parseActions []      = return (Transforms Pipes.cat Pipes.cat False)
 
 
 parseArgs :: ExceptT String IO (Bool, Path Abs Dir, Transforms, Evaluator)
 parseArgs = do
     args <- liftIO getArgs
 
+    liftIO $ checkHelpArg args
+
     let (links, args') = parseLinkStratArg args
 
     (path, args'') <- parsePathArg args'
 
-    res <- runScanT path (parseActions args'')
+    res <- runBakerT path $ hoist (hoist generalize) (parseActions args'')
 
     case res of
         Right (trns, evaluator) ->
             return (links, path, trns, evaluator)
 
-        Left err -> liftIO $ do
-            let errmsg = show err
-
-            putStrLn $ "error parsing arguments: " ++ show errmsg
-            putStrLn ""
-            die usage
+        Left err -> throwE (show err)
 
 
 main :: IO ()
 main = do
     (links, path, trns, evaluator) <- runExceptT parseArgs >>= \case
         Right res -> return res
-        Left  err -> do
-            putStrLn err
-            putStrLn ""
-            die usage
+        Left  err -> die $ "error parsing arguments: " ++ err
 
     let tree
-         | links     = (ls followSymlinks   path >>= yield) >-> followLinks
-         | otherwise = (ls symlinksAreFiles path >>= yield)
+         | links     = Walk.walk Walk.followSymlinks   path >-> C.followLinks
+         | otherwise = Walk.walk Walk.symlinksAreFiles path
 
-    res <- runEvalT evaluator $ runEffect $ tree
-               >-> onError report
+    res <- runEvalT evaluator $ Pipes.runEffect $ tree
+               >-> C.onError C.report
                >-> treeTransform trns
-               >-> flatten
+               >-> C.flatten
                >-> listTransform trns
-               >-> asPaths
-               >-> asFiles
-               >-> stringPaths
-               >-> P.stdoutLn
+               >-> C.asPaths
+               >-> C.asFiles
+               >-> C.stringPaths
+               >-> Pipes.stdoutLn
 
     case res of
         Right () -> return ()

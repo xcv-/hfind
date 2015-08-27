@@ -8,41 +8,43 @@ module System.Posix.Find.Lang.Predicate
   , parseFilterPredicate
   ) where
 
-import Control.Monad.Except
-import Control.Monad.Morph
+import Control.Monad.Trans        (lift)
+import Control.Monad.Trans.Except (Except, throwE)
+import Control.Monad.Morph        (hoist, generalize)
 
 import qualified Data.Text as T
 
 import System.Posix.Text.Path (Dir)
 
-import System.Posix.Find.Lang.Context (ScanT, EvalT)
-import System.Posix.Find.Lang.Eval    (runPredScan)
+import System.Posix.Find.Lang.Context (BakerT, Eval)
+import System.Posix.Find.Lang.Eval    (runPredBaker)
 import System.Posix.Find.Lang.Parser  (parsePred)
 import System.Posix.Find.Types        (FSNodeType(Resolved), FSNode(..),
                                        FSAnyNode(..),
                                        ListEntry(..), NodeListEntry)
 
 
-type NodePredicate  = FSAnyNode     'Resolved -> EvalT IO Bool
-type DirPredicate   = FSNode Dir    'Resolved -> EvalT IO Bool
-type EntryPredicate = NodeListEntry 'Resolved -> EvalT IO Bool
+type NodePredicate  = FSAnyNode     'Resolved -> Eval Bool
+type DirPredicate   = FSNode Dir    'Resolved -> Eval Bool
+type EntryPredicate = NodeListEntry 'Resolved -> Eval Bool
 
 
-parseNodePredicate :: String -> ScanT (ExceptT String IO) NodePredicate
+parseNodePredicate :: String -> BakerT (Except String) NodePredicate
 parseNodePredicate s =
     case parsePred s (T.pack s) of
-        Right mp -> hoist lift (runPredScan mp)
-        Left err -> lift $ throwError (show err)
+        Right mp -> hoist generalize (runPredBaker mp)
+        Left err -> lift (throwE (show err))
 
 
-parsePrunePredicate :: String -> ScanT (ExceptT String IO) DirPredicate
+parsePrunePredicate :: String -> BakerT (Except String) DirPredicate
 parsePrunePredicate s = do
     p <- parseNodePredicate s
 
     return (p . AnyNode)
 
 
-parseFilterPredicate :: String -> ScanT (ExceptT String IO) EntryPredicate
+
+parseFilterPredicate :: String -> BakerT (Except String) EntryPredicate
 parseFilterPredicate s = do
     p <- parseNodePredicate s
 

@@ -91,7 +91,7 @@ instance Arbitrary (Path Abs File) where
     shrink    = map dirToFile . shrink . fileToDir
 
 
-instance (m ~ Identity) => Arbitrary (Ls m FileName FileName) where
+instance (m ~ Identity) => Arbitrary (Walk m FileName FileName) where
     arbitrary = do
         file <- arbitrary
 
@@ -111,13 +111,13 @@ instance (m ~ Identity) => Arbitrary (Ls m FileName FileName) where
       [DirP dp (each subseq) | subseq <- subsequences (P.toList mbs)]
 
 
-instance (m ~ Identity) => Arbitrary (Ls m (Path Abs File) (Path Abs Dir)) where
+instance (m ~ Identity) => Arbitrary (Walk m (Path Abs File) (Path Abs Dir)) where
     arbitrary = do
         relative <- bimap getFileName getFileName <$> arbitrary
 
         absolute <$> arbitrary <*> pure relative
       where
-        absolute :: Path Abs Dir -> Ls Identity T.Text T.Text -> LsP Identity
+        absolute :: Path Abs Dir -> Walk Identity T.Text T.Text -> WalkP Identity
         absolute (Path par) (FileP fp) =
             FileP (unsafeAbsFile (par <> "/" <> fp))
         absolute par (DirP dp mbs) =
@@ -130,18 +130,18 @@ instance (m ~ Identity) => Arbitrary (Ls m (Path Abs File) (Path Abs Dir)) where
       [DirP dp (each subseq) | subseq <- subsequences (P.toList mbs)]
 
 
-instance (m ~ Identity, Ord fp, Ord dp) => Eq (Ls m fp dp) where
+instance (m ~ Identity, Ord fp, Ord dp) => Eq (Walk m fp dp) where
     FileP fp == FileP fp'        = fp == fp'
     DirP dp mbs == DirP dp' mbs' = dp == dp' &&
                                    sort (P.toList mbs) == sort (P.toList mbs')
     _ == _ = False
 
-instance (m ~ Identity, Ord fp, Ord dp) => Ord (Ls m fp dp) where
+instance (m ~ Identity, Ord fp, Ord dp) => Ord (Walk m fp dp) where
     FileP fp  `compare` FileP fp'   = fp `compare` fp'
     DirP dp _ `compare` DirP dp' _  = dp `compare` dp'
     FileP _   `compare` DirP _ _    = LT
     DirP _ _  `compare` FileP _     = GT
 
-instance (m ~ Identity, Show fp, Show dp) => Show (Ls m fp dp) where
+instance (m ~ Identity, Show fp, Show dp) => Show (Walk m fp dp) where
     show (FileP fp)    = "FileP " ++ show fp
     show (DirP dp mbs) = "DirP " ++ show dp ++ " " ++ show (P.toList mbs)

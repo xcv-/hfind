@@ -4,10 +4,10 @@ module System.Posix.Find (module X) where
 import Pipes as X
 import qualified Pipes.Prelude as P
 
-import System.Posix.Text.Path as X
-import System.Posix.Find.Types as X
+import System.Posix.Text.Path        as X
+import System.Posix.Find.Types       as X
 import System.Posix.Find.Combinators as X
-import System.Posix.Find.Ls as X
+import System.Posix.Find.Walk        as X
 
 import System.Posix.Find.Lang.Eval      as X
 import System.Posix.Find.Lang.Types     as X
@@ -19,7 +19,7 @@ import System.Posix.Find.Lang.Predicate as X
 
 find :: Path Abs Dir -> IO ()
 find p = runEffect $
-    (ls symlinksAreFiles p >>= yield)
+    walk symlinksAreFiles p
       >-> onError report
       >-> is resolved
       >-> flatten
@@ -30,7 +30,7 @@ find p = runEffect $
 
 findL :: Path Abs Dir -> IO ()
 findL p = runEffect $
-    (ls followSymlinks p >>= yield)
+    walk followSymlinks p
       >-> followLinks
       >-> onError report
       >-> is resolved

@@ -25,24 +25,27 @@ import System.IO (hPutStrLn, stderr)
 bimapM :: Monad m
        => (fp -> m fp')
        -> (dp -> m dp')
-       -> Ls m fp  dp
-       -> m (Ls m fp' dp')
+       -> Walk m fp  dp
+       -> m (Walk m fp' dp')
 bimapM mffp _    (FileP fp)    = FileP <$> mffp fp
 bimapM mffp mfdp (DirP dp mbs) = do
     dp' <- mfdp dp
     return $ DirP dp' (mbs >-> P.mapM (bimapM mffp mfdp))
 
 
-type Transform fp dp m = Pipe (Ls m fp dp) (Ls m fp dp) m ()
-type TransformP  m     = Pipe (LsP m)      (LsP m)      m ()
-type TransformN  m s   = Pipe (LsN  m s)   (LsN  m s)   m ()
-type TransformL  m     = Pipe (LsL  m)     (LsL  m)     m ()
-type TransformN' m     = Pipe (LsN' m)     (LsN' m)     m ()
-type TransformR  m     = Pipe (LsR  m)     (LsR  m)     m ()
+type Transform fp dp m = Pipe (Walk m fp dp) (Walk m fp dp) m ()
+type TransformP  m     = Pipe (WalkP m)      (WalkP m)      m ()
+type TransformN  m s   = Pipe (WalkN  m s)   (WalkN  m s)   m ()
+type TransformL  m     = Pipe (WalkL  m)     (WalkL  m)     m ()
+type TransformN' m     = Pipe (WalkN' m)     (WalkN' m)     m ()
+type TransformR  m     = Pipe (WalkR  m)     (WalkR  m)     m ()
+
+type EntryTransformN m s = Pipe (NodeListEntry s) (NodeListEntry s) m ()
+type EntryTransformR m   = EntryTransformN m 'Resolved
 
 
 mapChildren :: Monad m
-            => (Producer' (Ls m fp dp) m () -> Producer' (Ls m fp dp) m ())
+            => (Producer' (Walk m fp dp) m () -> Producer' (Walk m fp dp) m ())
             -> Transform fp dp m
 mapChildren f = P.map $ \case
                   DirP dp mbs -> DirP dp (f mbs)
@@ -62,15 +65,15 @@ fixP f = f_go
 
 
 recurse :: Monad m
-         => Pipe (Ls m fp dp) (Ls m fp dp) m ()
-         -> Pipe (Ls m fp dp) (Ls m fp dp) m ()
+         => Pipe (Walk m fp dp) (Walk m fp dp) m ()
+         -> Pipe (Walk m fp dp) (Walk m fp dp) m ()
 recurse f = fixP (\go -> f >-> mapChildren go)
 
 
-censor :: Monad m => (Ls m fp dp -> Bool) -> Transform fp dp m
+censor :: Monad m => (Walk m fp dp -> Bool) -> Transform fp dp m
 censor p = recurse (P.filter p)
 
-censorM :: Monad m => (Ls m fp dp -> m Bool) -> Transform fp dp m
+censorM :: Monad m => (Walk m fp dp -> m Bool) -> Transform fp dp m
 censorM p = recurse (P.filterM p)
 
 
@@ -100,10 +103,10 @@ censorNM :: Monad m => (forall t. IsPathType t => FSNode t s -> m Bool) -> Trans
 censorNM p = censorF2M p p
 
 
-skip :: Monad m => (Ls m fp dp -> Bool) -> Transform fp dp m
+skip :: Monad m => (Walk m fp dp -> Bool) -> Transform fp dp m
 skip p = censor (not . p)
 
-skipM :: Monad m => (Ls m fp dp -> m Bool) -> Transform fp dp m
+skipM :: Monad m => (Walk m fp dp -> m Bool) -> Transform fp dp m
 skipM p = censorM (fmap not . p)
 
 skipF2 :: Monad m => (fp -> Bool) -> (dp -> Bool) -> Transform fp dp m
@@ -145,7 +148,7 @@ follow (Symlink _ l n)   =
 follow (Missing p)       = Missing p
 follow (FSCycle l)       = FSCycle l
 
-followLinks :: Monad m => Pipe (LsL m) (LsN' m) m ()
+followLinks :: Monad m => Pipe (WalkL m) (WalkN' m) m ()
 followLinks = P.map (bimap follow follow)
 
 
@@ -168,18 +171,18 @@ silence = \case
     FSCycle _        -> return ()
 
 onError :: (Monad m, HasLinks s ~ HasLinks s')
-        => NodeFilter m s s' -> Pipe (LsN m s) (LsN m s') m ()
+        => NodeFilter m s s' -> Pipe (WalkN m s) (WalkN m s') m ()
 onError erase = fixP $ \go ->
     for cat $ \case
       FileP fp    -> erase fp >-> P.map FileP
       DirP dp mbs -> erase dp >-> P.map (\dp' -> DirP dp' (go mbs))
 
 
-clean :: MonadIO m => Pipe (LsL m) (LsR m) m ()
+clean :: MonadIO m => Pipe (WalkL m) (WalkR m) m ()
 clean = followLinks >-> onError report
 
 
-flatten :: Monad m => Pipe (Ls m fp dp) (ListEntry fp dp) m ()
+flatten :: Monad m => Pipe (Walk m fp dp) (ListEntry fp dp) m ()
 flatten =
     for cat $ \case
       FileP fp    -> yield (FileEntry fp)
@@ -205,14 +208,14 @@ stringPaths = P.map toString
 is :: Pipe a a m () -> Pipe a a m ()
 is = id
 
-raw :: Monad m => Pipe (LsN m 'Raw) (LsN m 'Raw) m ()
+raw :: Monad m => Pipe (WalkN m 'Raw) (WalkN m 'Raw) m ()
 raw = cat
 
-withLinks :: Monad m => Pipe (LsN m 'WithLinks) (LsN m 'WithLinks) m ()
+withLinks :: Monad m => Pipe (WalkN m 'WithLinks) (WalkN m 'WithLinks) m ()
 withLinks = cat
 
-withoutLinks :: Monad m => Pipe (LsN m 'WithoutLinks) (LsN m 'WithoutLinks) m ()
+withoutLinks :: Monad m => Pipe (WalkN m 'WithoutLinks) (WalkN m 'WithoutLinks) m ()
 withoutLinks = cat
 
-resolved :: Monad m => Pipe (LsN m 'Resolved) (LsN m 'Resolved) m ()
+resolved :: Monad m => Pipe (WalkN m 'Resolved) (WalkN m 'Resolved) m ()
 resolved = cat

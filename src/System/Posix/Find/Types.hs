@@ -34,19 +34,19 @@ infixl 1 <&>
 
 -- filesystem tree
 
-data Ls m fp dp
+data Walk m fp dp
   = FileP fp
-  | DirP  dp (Producer' (Ls m fp dp) m ())
+  | DirP  dp (Producer' (Walk m fp dp) m ())
 
-instance Monad m => Bifunctor (Ls m) where
+instance Monad m => Bifunctor (Walk m) where
     bimap ffp _   (FileP fp)    = FileP (ffp fp)
     bimap ffp fdp (DirP dp mbs) = DirP (fdp dp) (mbs >-> P.map (bimap ffp fdp))
 
-type LsP  m   = Ls m (Path Abs File) (Path Abs Dir)
-type LsN  m s = Ls m (FSNode File s) (FSNode Dir s)
-type LsL  m   = LsN m 'WithLinks
-type LsN' m   = LsN m 'WithoutLinks
-type LsR  m   = LsN m 'Resolved
+type WalkP  m   = Walk m (Path Abs File) (Path Abs Dir)
+type WalkN  m s = Walk m (FSNode File s) (FSNode Dir s)
+type WalkL  m   = WalkN m 'WithLinks
+type WalkN' m   = WalkN m 'WithoutLinks
+type WalkR  m   = WalkN m 'Resolved
 
 
 data FSNodeType = Raw | WithLinks | WithoutLinks | Resolved
@@ -107,6 +107,8 @@ nodeStat _ =
 
 
 data FSAnyNode s = forall t. AnyNode (FSNode t s)
+
+type FSAnyNodeR = FSAnyNode 'Resolved
 
 instance Eq (FSAnyNode 'Resolved) where
     AnyNode n1 == AnyNode n2 = n1 `nodeEq` n2

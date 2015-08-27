@@ -9,13 +9,13 @@ cabal sandbox init
 cabal install --dependencies-only
 cabal configure
 cabal build
-dist/build/hfind/hfind  # prints usage
+dist/build/hfind/hfind -h  # prints usage
 ```
 
 Some examples:
 --------------
 
-Find all files with `hs` extension in the `src` directory, following symlinks (`-L`).
+Find all files with the `.hs` extension in the `src` directory, following symlinks (`-L`).
 ```
 $ dist/build/hfind/hfind -L src -if '$type == "f" && $name =~ m|\.hs$|'
 

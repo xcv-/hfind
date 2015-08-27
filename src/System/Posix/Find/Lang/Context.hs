@@ -5,17 +5,19 @@
 module System.Posix.Find.Lang.Context
     ( VarId
     -- monads
-    , ScanT
-    , EvalT
-    , runScanT
+    , Baker
+    , BakerT
+    , runBakerT
+    , Eval
     , Evaluator(..)
-    -- Scan
-    , ScanConfig(..)
+    -- Baker
+    , BakerConfig(..)
     , readonly
     , addVar
     , getNumCaptures
     , updateNumCaptures
     , getVarId
+    , lookupEnv
     -- Builtins
     , lookupBuiltinVar
     , lookupBuiltinFunc
@@ -25,6 +27,8 @@ module System.Posix.Find.Lang.Context
     , getCaptureValue
     , setCaptures
     ) where
+
+import Data.Functor.Identity (Identity)
 
 import Control.Monad.IO.Class
 import Control.Monad.Catch (MonadThrow, MonadCatch)
@@ -36,30 +40,36 @@ import Control.Monad.Morph
 
 import Data.List (elemIndex)
 
+import Data.ByteString (ByteString)
+
 import qualified Data.Text          as T
+import qualified Data.Text.Encoding as T
 
 import qualified Data.Text.ICU as ICU
 
 import Data.Vector.Mutable (IOVector)
 import qualified Data.Vector.Mutable as V
 
+import qualified System.Posix.Env.ByteString as Posix
+
 import System.Posix.Text.Path (Path, Abs, Dir)
 
-import System.Posix.Find.Lang.Types
+import System.Posix.Find.Lang.Types (Name, Value(..), RxCaptureMode(..),
+                                     VarNotFoundError, RuntimeError)
 
 import qualified System.Posix.Find.Lang.Builtins as Builtins
 
 
 newtype VarId = VarId Int
 
-data ScanContext = ScanContext
+data BakingContext = BakingContext
     { ctxVars           :: ![Name] -- reversed
     , ctxNumVars        :: !Int
     , ctxNumCaptures    :: !Int
     }
 
-defScanContext :: ScanContext
-defScanContext = ScanContext [] 0 0
+defBakingContext :: BakingContext
+defBakingContext = BakingContext [] 0 0
 
 data EvalContext = EvalContext
     { ctxValues      :: !(IOVector Value) -- reversed
@@ -72,22 +82,27 @@ defEvalContext maxVals = do
     return (EvalContext vals Nothing)
 
 
--- ScanT/EvalT transformers -----------------------------------------
+-- BakerT/EvalT transformers -----------------------------------------
 
-data ScanConfig = ScanConfig
-    { scanRoot     :: Path Abs Dir
-    , scanBuiltins :: Builtins.Builtins (EvalT IO)
+data BakerConfig = BakerConfig
+    { bakerRoot     :: Path Abs Dir
+    , bakerBuiltins :: Builtins.Builtins (EvalT IO)
+    , bakerSysEnv   :: [(ByteString, Value)]
     }
 
-newtype ScanT m a =
-    ScanT (ExceptT VarNotFoundError
-            (StateT ScanContext
-              (ReaderT ScanConfig m))
-                a)
+type Baker a = BakerT Identity a
+
+newtype BakerT m a =
+    BakerT (ExceptT VarNotFoundError
+             (StateT BakingContext
+               (ReaderT BakerConfig m))
+                 a)
     deriving (Functor, Applicative, Monad,
               MonadError VarNotFoundError,
-              MonadReader ScanConfig,
+              MonadReader BakerConfig,
               MonadIO)
+
+type Eval = EvalT IO
 
 newtype EvalT m a =
     EvalT (ExceptT RuntimeError
@@ -97,11 +112,11 @@ newtype EvalT m a =
               MonadError RuntimeError,
               MonadIO, MonadThrow, MonadCatch)
 
-instance MonadTrans ScanT where
-    lift = ScanT . lift . lift . lift
+instance MonadTrans BakerT where
+    lift = BakerT . lift . lift . lift
 
-instance MFunctor ScanT where
-    hoist f (ScanT m) = ScanT $ hoist (hoist (hoist f)) m
+instance MFunctor BakerT where
+    hoist f (BakerT m) = BakerT $ hoist (hoist (hoist f)) m
 
 instance MonadTrans EvalT where
     lift = EvalT . lift . lift
@@ -109,8 +124,6 @@ instance MonadTrans EvalT where
 instance MFunctor EvalT where
     hoist f (EvalT m) = EvalT $ hoist (hoist f) m
 
-type Eval a = forall m. MonadIO m => EvalT m a
-type Scan a = forall m. MonadIO m => ScanT m a
 
 type BuiltinVar  = Builtins.BuiltinVar  (EvalT IO)
 type BuiltinFunc = Builtins.BuiltinFunc (EvalT IO)
@@ -119,14 +132,20 @@ type BuiltinFunc = Builtins.BuiltinFunc (EvalT IO)
 newtype Evaluator = Evaluator
     { runEvalT :: forall m a. MonadIO m => EvalT m a -> m (Either RuntimeError a) }
 
-runScanT :: MonadIO m
-         => Path Abs Dir
-         -> ScanT m a
-         -> m (Either VarNotFoundError (a, Evaluator))
-runScanT root (ScanT m) = do
-    let cfg = ScanConfig root (Builtins.mkBuiltins root)
+runBakerT :: MonadIO m
+          => Path Abs Dir
+          -> BakerT m a
+          -> m (Either VarNotFoundError (a, Evaluator))
+runBakerT root (BakerT m) = do
+    env <- liftIO Posix.getEnvironment
 
-    (ma, s) <- runReaderT (runStateT (runExceptT m) defScanContext) cfg
+    let cfg = BakerConfig {
+          bakerRoot     = root
+        , bakerBuiltins = Builtins.mkBuiltins root
+        , bakerSysEnv   = map (\(k,v) -> (k, StringV (T.decodeUtf8 v))) env
+        }
+
+    (ma, s) <- runReaderT (runStateT (runExceptT m) defBakingContext) cfg
 
     let run = Evaluator $ \(EvalT n) -> do
                   ctx <- liftIO $ defEvalContext (ctxNumVars s)
@@ -135,18 +154,18 @@ runScanT root (ScanT m) = do
     return $ fmap (\a -> (a, run)) ma
 
 
--- Scan primitives --------------------------------------------------
+-- Baker primitives --------------------------------------------------
 
-readonly :: Monad m => ScanT m a -> ScanT m a
-readonly (ScanT m) = ScanT $ do
+readonly :: Monad m => BakerT m a -> BakerT m a
+readonly (BakerT m) = BakerT $ do
     s <- get
     a <- m
     put s
     return a
 
 
-addVar :: Name -> Scan VarId
-addVar name = ScanT $ do
+addVar :: Monad m => Name -> BakerT m VarId
+addVar name = BakerT $ do
     modify $ \ctx ->
       ctx { ctxVars       = name : ctxVars ctx
           , ctxNumVars    = 1 + ctxNumVars ctx
@@ -154,51 +173,57 @@ addVar name = ScanT $ do
     gets (VarId . ctxNumVars)
 
 
-getNumCaptures :: Scan Int
-getNumCaptures = ScanT $ gets ctxNumCaptures
+getNumCaptures :: Monad m => BakerT m Int
+getNumCaptures = BakerT $ gets ctxNumCaptures
 
-updateNumCaptures :: RxCaptureMode -> ICU.Regex -> Scan ()
+updateNumCaptures :: Monad m => RxCaptureMode -> ICU.Regex -> BakerT m ()
 updateNumCaptures NoCapture _  = return ()
-updateNumCaptures Capture   rx = ScanT $ do
+updateNumCaptures Capture   rx = BakerT $ do
     let numCaptures = ICU.groupCount rx
 
     -- +1 because the full pattern is $0
     modify $ \ctx -> ctx { ctxNumCaptures = numCaptures+1 }
 
-getVarId :: Name -> Scan (Maybe VarId)
-getVarId name = ScanT $ do
+getVarId :: Monad m => Name -> BakerT m (Maybe VarId)
+getVarId name = BakerT $ do
     vars <- gets ctxVars
 
     return $ VarId <$> elemIndex name vars
 
 
-lookupBuiltinVar :: Name -> Scan (Maybe BuiltinVar)
-lookupBuiltinVar name = ScanT $ do
-    builtins <- asks scanBuiltins
+
+lookupEnv :: Monad m => ByteString -> BakerT m (Maybe Value)
+lookupEnv name = BakerT $ do
+    env <- asks bakerSysEnv
+    return $! lookup name env
+
+lookupBuiltinVar :: Monad m => Name -> BakerT m (Maybe BuiltinVar)
+lookupBuiltinVar name = BakerT $ do
+    builtins <- asks bakerBuiltins
     return $! Builtins.lookupVar builtins name
 
-lookupBuiltinFunc :: Name -> Scan (Maybe BuiltinFunc)
-lookupBuiltinFunc name = ScanT $ do
-    builtins <- asks scanBuiltins
+lookupBuiltinFunc :: Monad m => Name -> BakerT m (Maybe BuiltinFunc)
+lookupBuiltinFunc name = BakerT $ do
+    builtins <- asks bakerBuiltins
     return $! Builtins.lookupFunc builtins name
 
 
 
 -- Eval primitives --------------------------------------------------
 
-getVarValue :: VarId -> Eval Value
+getVarValue :: MonadIO m => VarId -> EvalT m Value
 getVarValue (VarId i) = EvalT $ do
     vals <- gets ctxValues
     liftIO $ V.read vals i
 
-setVarValue :: VarId -> Value -> Eval ()
+setVarValue :: MonadIO m => VarId -> Value -> EvalT m ()
 setVarValue (VarId i) val = EvalT $ do
     vars <- gets ctxValues
     liftIO $ V.write vars i val
     return ()
 
 
-getCaptureValue :: Int -> Eval T.Text
+getCaptureValue :: Monad m => Int -> EvalT m T.Text
 getCaptureValue i = EvalT $ do
     Just match <- gets ctxActiveMatch
 
@@ -209,7 +234,7 @@ getCaptureValue i = EvalT $ do
                       ++ " of " ++ T.unpack (ICU.pattern match)
 
 
-setCaptures :: RxCaptureMode -> ICU.Match -> Eval ()
+setCaptures :: Monad m => RxCaptureMode -> ICU.Match -> EvalT m ()
 setCaptures NoCapture _     = return ()
 setCaptures Capture   match = EvalT $
     modify $ \ctx -> ctx { ctxActiveMatch = Just match }

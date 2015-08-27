@@ -31,12 +31,16 @@ import qualified System.Posix as Posix
 import System.Posix.Text.Path (Path, Abs, File, RawPath)
 import qualified System.Posix.Text.Path as Path
 
-import System.Posix.Find.Types
+import System.Posix.Find.Types (FSNodeType(..), FSNode(..), FSAnyNode(..),
+                                nodePath, nodeStat)
+
+import qualified System.Posix.Find.Walk as Walk
+
 import System.Posix.Find.Lang.Types
-import System.Posix.Find.Ls
 
 
 -- m is usually EvalT IO
+
 
 type BuiltinVar  m = FSAnyNode 'Resolved -> m Value
 type BuiltinFunc m = Value               -> m Value
@@ -114,13 +118,14 @@ mkBuiltins root =
     fn_stat raw = do
         path <- canonicalize raw
 
-        n <- liftIO $ loadNodeAt path symlinksAreFiles
+        n <- liftIO $ Walk.getStat path Walk.symlinksAreFiles
 
         case n of
             AnyNode (FileNode st p) -> return $ AnyNode (FileNode st p)
             AnyNode (DirNode st p)  -> return $ AnyNode (DirNode st p)
             AnyNode (Missing p)     -> throwError (NotFound p)
             _                       -> error "fn_stat: impossible!"
+
 
     falseWhenNotFound :: m Bool -> m Bool
     falseWhenNotFound m = m `catchError` \case
@@ -242,3 +247,7 @@ mkBuiltins root =
         groupId    <- fn_groupid n
         groupEntry <- liftIO $ Posix.getGroupEntryForID (fromIntegral groupId)
         return $! T.pack (Posix.groupName groupEntry)
+
+
+
+

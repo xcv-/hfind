@@ -21,7 +21,7 @@ spec = do
     let file fp   = FileP fp
         dir dp bs = DirP dp (each bs)
 
-    let samplei :: Ls Identity Int Int
+    let samplei :: Walk Identity Int Int
         samplei = dir 0 [ file 1
                         , dir 2 [ file 3
                                 , file 4
@@ -33,7 +33,7 @@ spec = do
                                 ]
                         ]
 
-        samplep :: LsP Identity
+        samplep :: WalkP Identity
         samplep = dir "/" [ file "/a"
                           , file "/b"
                           , dir "/tmp/" [ file "/tmp/adb.log"
@@ -54,7 +54,7 @@ spec = do
     describe "System.Posix.Find.Combinators" $ do
         context "bimap" $ do
             -- free theorems!
-            it "Ls m is a bifunctor" $ do
+            it "Walk m is a bifunctor" $ do
                 bimap id id samplei `shouldBe` samplei
                 bimap id id samplep `shouldBe` samplep
 

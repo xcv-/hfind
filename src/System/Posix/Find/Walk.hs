@@ -1,14 +1,16 @@
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
-module System.Posix.Find.Ls
+module System.Posix.Find.Walk
     ( SymlinkStrategy
     , followSymlinks
     , symlinksAreFiles
-    , loadNodeAt
-    , ls
+    , getStat
+    , walk
+    , walk1
     ) where
 
 import Control.Monad
@@ -104,9 +106,9 @@ discriminatePath strat = go
                   (visited', FileEntry (FileNode stat (asFilePath path)))
 
 
-loadNodeAt :: forall s. HasErrors s ~ 'True
-           => Path Abs File -> SymlinkStrategy s -> IO (FSAnyNode s)
-loadNodeAt path strat = handling $ do
+getStat :: forall s. HasErrors s ~ 'True
+        => Path Abs File -> SymlinkStrategy s -> IO (FSAnyNode s)
+getStat path strat = handling $ do
     (_, entry) <- discriminatePath strat [] path
 
     case entry of
@@ -118,12 +120,19 @@ loadNodeAt path strat = handling $ do
              . handle (\(FileNotFoundError p) -> return $! AnyNode (Missing p))
 
 
-ls :: forall m io s.
-        (MonadIO m, MonadIO io, MonadCatch m, HasErrors s ~ 'True)
-   => SymlinkStrategy s
-   -> Path Abs Dir
-   -> io (LsN m s)
-ls strat = liftIO . go []
+walk :: (MonadIO m, MonadIO io, MonadCatch m, HasErrors s ~ 'True)
+     => SymlinkStrategy s
+     -> Path Abs Dir
+     -> Producer' (WalkN m s) io ()
+walk strat root =
+    yield =<< liftIO (walk1 strat root)
+
+
+walk1 :: forall m s.  (MonadIO m, MonadCatch m, HasErrors s ~ 'True)
+      => SymlinkStrategy s
+      -> Path Abs Dir
+      -> IO (WalkN m s)
+walk1 strat = liftIO . go []
   where
     go visited root = do
         (visited', entry) <- discriminatePath strat visited (asFilePath root)
@@ -148,6 +157,6 @@ ls strat = liftIO . go []
     valid ".." = False
     valid _    = True
 
-    handling :: IO (LsN m s) -> IO (LsN m s)
+    handling :: IO (WalkN m s) -> IO (WalkN m s)
     handling = handle (\(FSCycleError l)      -> return (FileP (FSCycle l)))
              . handle (\(FileNotFoundError p) -> return (FileP (Missing p)))
