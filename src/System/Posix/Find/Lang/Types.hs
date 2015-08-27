@@ -55,7 +55,7 @@ class IsExpr (PredExpr pre) => IsPred pre where
 data Value = BoolV   !Bool
            | NumV    !Int64
            | StringV !T.Text
-           | NodeV   !(FSAnyNode 'Resolved)
+           | NodeV   !FSAnyNodeR
     deriving (Eq)
 
 data ValueType = TBool | TNum | TString | TNode

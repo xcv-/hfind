@@ -189,7 +189,7 @@ flatten =
       DirP dp mbs -> yield (DirEntry  dp) >> (mbs >-> flatten)
 
 
-asPaths :: Monad m => Pipe (NodeListEntry 'Resolved) PathListEntry m ()
+asPaths :: Monad m => Pipe NodeListEntryR PathListEntry m ()
 asPaths = P.map (bimap nodePath nodePath)
 
 asFiles :: Monad m => Pipe PathListEntry (Path Abs File) m ()

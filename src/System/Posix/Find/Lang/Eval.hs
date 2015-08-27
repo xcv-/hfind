@@ -26,7 +26,7 @@ import qualified Data.Text.ICU as ICU
 
 import qualified System.Posix.Text.Path as Path
 
-import System.Posix.Find.Types (FSAnyNode(..), FSNodeType(..), nodePath)
+import System.Posix.Find.Types (FSAnyNode(..), FSAnyNodeR, nodePath)
 
 import System.Posix.Find.Lang.Types
 
@@ -34,8 +34,8 @@ import System.Posix.Find.Lang.Context (Baker, Eval)
 import qualified System.Posix.Find.Lang.Context as Ctx
 
 
-type EvalValue = FSAnyNode 'Resolved -> Eval Value
-type EvalBool  = FSAnyNode 'Resolved -> Eval Bool
+type EvalValue = FSAnyNodeR -> Eval Value
+type EvalBool  = FSAnyNodeR -> Eval Bool
 
 newtype LitBaker  = LitBaker  { runLitBaker  :: Baker Value     }
 newtype VarBaker  = VarBaker  { runVarBaker  :: Baker EvalValue }

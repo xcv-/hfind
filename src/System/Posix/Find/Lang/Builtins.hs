@@ -31,7 +31,7 @@ import qualified System.Posix as Posix
 import System.Posix.Text.Path (Path, Abs, File, RawPath)
 import qualified System.Posix.Text.Path as Path
 
-import System.Posix.Find.Types (FSNodeType(..), FSNode(..), FSAnyNode(..),
+import System.Posix.Find.Types (FSNode(..), FSAnyNode(..), FSAnyNodeR,
                                 nodePath, nodeStat)
 
 import qualified System.Posix.Find.Walk as Walk
@@ -42,8 +42,8 @@ import System.Posix.Find.Lang.Types
 -- m is usually EvalT IO
 
 
-type BuiltinVar  m = FSAnyNode 'Resolved -> m Value
-type BuiltinFunc m = Value               -> m Value
+type BuiltinVar  m = FSAnyNodeR -> m Value
+type BuiltinFunc m = Value      -> m Value
 
 data Builtins m = Builtins
     { builtinVars  :: H.HashMap Name (BuiltinVar  m)
@@ -113,7 +113,7 @@ mkBuiltins root =
             Nothing   -> throwError (InvalidPathOp p "canonicalize")
 
 
-    fn_stat :: T.Text -> m (FSAnyNode 'Resolved)
+    fn_stat :: T.Text -> m FSAnyNodeR
     fn_stat ""  = throwError (InvalidPathOp "" "canonicalize")
     fn_stat raw = do
         path <- canonicalize raw
@@ -155,7 +155,7 @@ mkBuiltins root =
              (fn_stat raw)
 
 
-    fn_type :: FSAnyNode 'Resolved -> m T.Text
+    fn_type :: FSAnyNodeR -> m T.Text
     fn_type (AnyNode n)
       | Posix.isBlockDevice     s = return "b"
       | Posix.isCharacterDevice s = return "c"
@@ -168,50 +168,50 @@ mkBuiltins root =
       where
         s = nodeStat n
 
-    fn_hidden :: FSAnyNode 'Resolved -> m Bool
+    fn_hidden :: FSAnyNodeR -> m Bool
     fn_hidden n = do
          name <- fn_name n
          return ("." `T.isPrefixOf` name)
 
-    fn_name :: FSAnyNode 'Resolved -> m T.Text
+    fn_name :: FSAnyNodeR -> m T.Text
     fn_name (AnyNode n) =
         let path = nodePath n in
         case Path.filename path of
             Just name -> return name
             Nothing   -> throwError (InvalidPathOp (Path.toText path) "filename")
 
-    fn_path :: FSAnyNode 'Resolved -> m T.Text
+    fn_path :: FSAnyNodeR -> m T.Text
     fn_path (AnyNode n) =
         return $! Path.toText (nodePath n)
 
-    fn_relpath :: FSAnyNode 'Resolved -> m T.Text
+    fn_relpath :: FSAnyNodeR -> m T.Text
     fn_relpath (AnyNode _) =
         undefined
 
-    fn_parent :: FSAnyNode 'Resolved -> m (FSAnyNode 'Resolved)
+    fn_parent :: FSAnyNodeR -> m FSAnyNodeR
     fn_parent n = do
         parentPath <- fn_parentpath n
         fn_stat parentPath
 
-    fn_parentpath :: FSAnyNode 'Resolved -> m T.Text
+    fn_parentpath :: FSAnyNodeR -> m T.Text
     fn_parentpath (AnyNode n) =
         let path = nodePath n in
         case Path.parent path of
             Just parent -> return (Path.toText (Path.asDirPath parent))
             Nothing     -> throwError (InvalidPathOp (Path.toText path) "parent")
 
-    fn_parentname :: FSAnyNode 'Resolved -> m T.Text
+    fn_parentname :: FSAnyNodeR -> m T.Text
     fn_parentname = fn_parent >=> fn_name
 
-    fn_size :: FSAnyNode 'Resolved -> m Int64
+    fn_size :: FSAnyNodeR -> m Int64
     fn_size (AnyNode n) =
         return $! fromIntegral (Posix.fileSize (nodeStat n))
 
-    fn_nlinks :: FSAnyNode 'Resolved -> m Int64
+    fn_nlinks :: FSAnyNodeR -> m Int64
     fn_nlinks (AnyNode n) =
         return $! fromIntegral (Posix.linkCount (nodeStat n))
 
-    fn_perms :: FSAnyNode 'Resolved -> m T.Text
+    fn_perms :: FSAnyNodeR -> m T.Text
     fn_perms (AnyNode n) =
         return $! T.pack
           [ if has Posix.ownerReadMode    then 'r' else '-'
@@ -228,21 +228,21 @@ mkBuiltins root =
         has perm = Posix.intersectFileModes mode perm == perm
         mode = Posix.fileMode (nodeStat n)
 
-    fn_ownerid  :: FSAnyNode 'Resolved -> m Int64
+    fn_ownerid  :: FSAnyNodeR -> m Int64
     fn_ownerid (AnyNode n) =
         return $! fromIntegral (Posix.fileOwner (nodeStat n))
 
-    fn_owner :: FSAnyNode 'Resolved -> m T.Text
+    fn_owner :: FSAnyNodeR -> m T.Text
     fn_owner n = do
         ownerId    <- fn_ownerid n
         ownerEntry <- liftIO $ Posix.getUserEntryForID (fromIntegral ownerId)
         return $! T.pack (Posix.userName ownerEntry)
 
-    fn_groupid :: FSAnyNode 'Resolved -> m Int64
+    fn_groupid :: FSAnyNodeR -> m Int64
     fn_groupid (AnyNode n) =
         return $! fromIntegral (Posix.fileGroup (nodeStat n))
 
-    fn_group :: FSAnyNode 'Resolved -> m T.Text
+    fn_group :: FSAnyNodeR -> m T.Text
     fn_group n = do
         groupId    <- fn_groupid n
         groupEntry <- liftIO $ Posix.getGroupEntryForID (fromIntegral groupId)
