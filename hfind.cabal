@@ -26,6 +26,9 @@ library
                        System.Posix.Find.Lang.Parser,
                        System.Posix.Find.Lang.Predicate,
                        System.Posix.Find.Lang.Types,
+                       System.Posix.Find.Lang.Types.AST,
+                       System.Posix.Find.Lang.Types.Error,
+                       System.Posix.Find.Lang.Types.Value,
                        System.Posix.Find.Types,
                        System.Posix.Find.Walk,
                        System.Posix.Text.Path

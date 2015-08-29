@@ -19,14 +19,11 @@ import Data.Monoid
 import Control.Applicative
 import Control.Monad.Except
 
-import qualified Data.Text          as T
 import qualified Data.Text.Encoding as T
 
 import qualified Data.Text.ICU as ICU
 
-import qualified System.Posix.Text.Path as Path
-
-import System.Posix.Find.Types (FSAnyNode(..), FSAnyNodeR, nodePath)
+import System.Posix.Find.Types (FSAnyNodeR)
 
 import System.Posix.Find.Lang.Types
 
@@ -41,15 +38,6 @@ newtype LitBaker  = LitBaker  { runLitBaker  :: Baker Value     }
 newtype VarBaker  = VarBaker  { runVarBaker  :: Baker EvalValue }
 newtype ExprBaker = ExprBaker { runExprBaker :: Baker EvalValue }
 newtype PredBaker = PredBaker { runPredBaker :: Baker EvalBool  }
-
-
-coerceToString :: Value -> T.Text
-coerceToString = \case
-    BoolV   True        -> "true"
-    BoolV   False       -> "false"
-    NumV    x           -> T.pack (show x)
-    StringV s           -> s
-    NodeV   (AnyNode n) -> Path.toText (nodePath n)
 
 
 litValue :: Lit -> Value
