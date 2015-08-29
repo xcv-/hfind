@@ -37,6 +37,7 @@ except the `.hs` extension in the same directory
 ```
 $ dist/build/hfind/hfind src -if '$name =~ m|(.*)\.hs$| && isdir "$parentpath/$1"'
 
+/home/[...]/hfind/src/System/Posix/Lang/Types.hs
 /home/[...]/hfind/src/System/Posix/Find.hs
 ```
 
