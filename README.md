@@ -72,8 +72,7 @@ $ me=$UID we=$GID dist/build/hfind/hfind dist -if '
                 ||  $3 == "x"
                 )
              )
-    && readint $1 >= 7
-    && readint $2 >= 10'
+    && ($1 == "7" && readint $2 >= 10 || readint $1 > 7)'
 
 /home/[...]/hfind/dist/build/libHShfind-0.1.0.0-48aLcpNTab3EiWEDW5Bwk0-ghc7.10.2.so
 /home/[...]/hfind/dist/build/libHShfind-0.1.0.0-D1R5LGKLZgw0oun3dxLEOZ-ghc7.10.2.so
