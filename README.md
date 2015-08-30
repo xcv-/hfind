@@ -22,12 +22,15 @@ $ dist/build/hfind/hfind -L src -if '$type == "f" && $name =~ m|\.hs$|'
 /home/[...]/hfind/src/System/Posix/Find/Combinators.hs
 /home/[...]/hfind/src/System/Posix/Find/Lang/Builtins.hs
 /home/[...]/hfind/src/System/Posix/Find/Lang/Context.hs
+/home/[...]/hfind/src/System/Posix/Find/Lang/Error.hs
 /home/[...]/hfind/src/System/Posix/Find/Lang/Eval.hs
 /home/[...]/hfind/src/System/Posix/Find/Lang/Parser.hs
 /home/[...]/hfind/src/System/Posix/Find/Lang/Predicate.hs
+/home/[...]/hfind/src/System/Posix/Find/Lang/Types/AST.hs
+/home/[...]/hfind/src/System/Posix/Find/Lang/Types/Value.hs
 /home/[...]/hfind/src/System/Posix/Find/Lang/Types.hs
-/home/[...]/hfind/src/System/Posix/Find/Ls.hs
 /home/[...]/hfind/src/System/Posix/Find/Types.hs
+/home/[...]/hfind/src/System/Posix/Find/Walk.hs
 /home/[...]/hfind/src/System/Posix/Find.hs
 /home/[...]/hfind/src/System/Posix/Text/Path.hs
 ```
