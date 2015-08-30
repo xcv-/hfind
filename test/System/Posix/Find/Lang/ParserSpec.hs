@@ -14,8 +14,8 @@ import Text.RawString.QQ (r)
 
 import SpecHelper
 
-instance IsString a => IsString (Either a b) where
-    fromString = Left . fromString
+instance IsString (Interp a) where
+    fromString = InterpLit . fromString
 
 instance IsString Expr where
     fromString = LitE . StringL . fromString
@@ -34,6 +34,7 @@ instance Eq Expr where
     _         == _         = False
 
 instance Eq Pred where
+    ScopeP a     == ScopeP b        = a == b
     NotP a       == NotP b          = a == b
     AndP a b     == AndP c d        = a == c && b == d
     OrP a b      == OrP c d         = a == c && b == d
@@ -57,8 +58,8 @@ spec = do
     let trueP  = ExprP true
         falseP = ExprP false
 
-    let ivar n = Right (NamedVar n)
-        irxc i = Right (RxCapVar i)
+    let ivar n = InterpVar (NamedVar n)
+        irxc i = InterpVar (RxCapVar i)
 
     describe "System.Posix.Find.Lang.Parser" $ do
         context "exprParser" $ do
@@ -122,6 +123,10 @@ spec = do
                 parseP [r|"asdf$q"|] `shouldBe`
                     Right (ExprP (InterpE ["asdf", ivar "q"]))
 
+            it "parses explicit scopes" $ do
+                parseP [r|scope(true)|] `shouldBe`
+                    Right (ScopeP (ExprP true))
+
             it "parses negations" $ do
                 parseP [r|not(true)|] `shouldBe`
                     Right (NotP (ExprP true))
@@ -176,3 +181,6 @@ spec = do
 
                 parseP [r| true && not(false || true) && true |] `shouldBe`
                     Right ((trueP `AndP` NotP (falseP `OrP` trueP)) `AndP` trueP)
+
+                parseP [r| true && (true || true && true) || true |] `shouldBe`
+                    Right ((trueP `AndP` ((trueP `OrP` trueP) `AndP` trueP)) `OrP` trueP)

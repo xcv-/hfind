@@ -1,3 +1,6 @@
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 module System.Posix.Find.Lang.Types.AST where
@@ -6,39 +9,50 @@ import Data.Int      (Int64)
 import Data.Text     (Text)
 import Data.Text.ICU (Regex)
 
+import Text.Parsec.Pos (SourcePos)
+
+
+type Src = Text
+type SrcLoc = (Src, SourcePos)
+
+
+data Interp var = InterpLit !Text
+                | InterpVar !var
+    deriving (Eq, Show)
+
 
 -- enable both AST debugging and fusing parsing/analysis (see Eval.hs)
 
 class IsLit lit where
-    boolL   :: Bool   -> lit
-    numL    :: Int64  -> lit
-    stringL :: Text -> lit
+    boolL   :: Bool  -> SrcLoc -> lit
+    numL    :: Int64 -> SrcLoc -> lit
+    stringL :: Text  -> SrcLoc -> lit
 
 class IsVar var where
-    namedVar :: Text -> var
-    rxCapVar :: Int    -> var
+    namedVar :: Text -> SrcLoc -> var
+    rxCapVar :: Int  -> SrcLoc -> var
 
 class (IsLit (ExprLit expr), IsVar (ExprVar expr)) => IsExpr expr where
     type ExprLit expr
     type ExprVar expr
 
-    litE    :: ExprLit expr -> expr
-    varE    :: ExprVar expr -> expr
-    appE    :: Name -> expr -> expr
+    litE    :: ExprLit expr -> SrcLoc -> expr
+    varE    :: ExprVar expr -> SrcLoc -> expr
+    appE    :: Name -> expr -> SrcLoc -> expr
 
-    interpE :: [Either Text (ExprVar expr)] -> expr
+    interpE :: [Interp (ExprVar expr)] -> SrcLoc -> expr
 
 class IsExpr (PredExpr pre) => IsPred pre where
     type PredExpr pre
 
-    notP  :: pre        -> pre
-    andP  :: pre -> pre -> pre
-    orP   :: pre -> pre -> pre
+    scopeP :: pre        -> SrcLoc -> pre
+    notP   :: pre        -> SrcLoc -> pre
+    andP   :: pre -> pre -> SrcLoc -> pre
+    orP    :: pre -> pre -> SrcLoc -> pre
 
-    exprP  :: PredExpr pre -> pre
-    matchP :: PredExpr pre -> Regex -> RxCaptureMode -> pre
-    opP    :: Op -> PredExpr pre -> PredExpr pre -> pre
-
+    exprP  :: PredExpr pre                           -> SrcLoc -> pre
+    matchP :: PredExpr pre -> Regex -> RxCaptureMode -> SrcLoc -> pre
+    opP    :: Op -> PredExpr pre -> PredExpr pre     -> SrcLoc -> pre
 
 
 -- AST data
@@ -57,18 +71,27 @@ data Var = NamedVar !Name
 data Expr = LitE    !Lit
           | VarE    !Var
           | AppE    !Name !Expr
-          | InterpE ![Either Text Var]
+          | InterpE ![Interp Var]
     deriving (Show)
 
 
 data Op = OpEQ | OpLT | OpLE | OpGT | OpGE
     deriving (Eq, Show)
 
+opSymbol :: Op -> Text
+opSymbol OpEQ = "=="
+opSymbol OpLT = ">"
+opSymbol OpLE = ">="
+opSymbol OpGT = "<"
+opSymbol OpGE = "=<"
+
+
 data RxCaptureMode = Capture | NoCapture
     deriving (Eq, Show)
 
 
-data Pred = NotP   !Pred
+data Pred = ScopeP !Pred
+          | NotP   !Pred
           | AndP   !Pred !Pred
           | OrP    !Pred !Pred
           | ExprP  !Expr
@@ -77,32 +100,32 @@ data Pred = NotP   !Pred
     deriving Show
 
 
-
 instance IsLit Lit where
-    boolL   = BoolL
-    numL    = NumL
-    stringL = StringL
+    boolL   = const . BoolL
+    numL    = const . NumL
+    stringL = const . StringL
 
 instance IsVar Var where
-    namedVar = NamedVar
-    rxCapVar = RxCapVar
+    namedVar = const . NamedVar
+    rxCapVar = const . RxCapVar
 
 instance IsExpr Expr where
     type ExprLit Expr = Lit
     type ExprVar Expr = Var
 
-    litE = LitE
-    varE = VarE
-    appE = AppE
-    interpE = InterpE
+    litE    = const . LitE
+    varE    = const . VarE
+    appE f  = const . AppE f
+    interpE = const . InterpE
 
 instance IsPred Pred where
     type PredExpr Pred = Expr
 
-    notP = NotP
-    andP = AndP
-    orP  = OrP
+    scopeP = const . ScopeP
+    notP   = const . NotP
+    andP p = const . AndP p
+    orP p  = const . OrP p
 
-    exprP  = ExprP
-    matchP = MatchP
-    opP    = OpP
+    exprP       = const . ExprP
+    matchP e rx = const . MatchP e rx
+    opP op e1   = const . OpP op e1

@@ -3,5 +3,4 @@ module System.Posix.Find.Lang.Types
   ) where
 
 import System.Posix.Find.Lang.Types.AST   as X
-import System.Posix.Find.Lang.Types.Error as X
 import System.Posix.Find.Lang.Types.Value as X

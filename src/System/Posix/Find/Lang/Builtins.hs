@@ -23,6 +23,7 @@ import Control.Monad.Except
 import Data.Int (Int64)
 
 import qualified Data.Text as T
+import Text.Read (readMaybe)
 
 import qualified Data.HashMap.Strict as H
 
@@ -37,6 +38,7 @@ import System.Posix.Find.Types (FSNode(..), FSAnyNode(..), FSAnyNodeR,
 import qualified System.Posix.Find.Walk as Walk
 
 import System.Posix.Find.Lang.Types
+import System.Posix.Find.Lang.Error (RuntimeError(..), expectedButFound)
 
 
 -- m is usually EvalT IO
@@ -73,16 +75,25 @@ mkBuiltins root =
     Builtins vars funcs
   where
     erase :: (IsValue a, IsValue b) => (a -> m b) -> BuiltinFunc m
-    erase f val =
+    erase = eraseInput . eraseOutput
+
+    eraseInput :: IsValue a => (a -> m b) -> Value -> m b
+    eraseInput f val =
         case fromValue val of
-            Just x  -> fmap toValue (f x)
+            Just x  -> f x
             nothing -> throwError $
                 valueTypeOf nothing `expectedButFound` typeOf val
+
+    eraseOutput :: IsValue b => (a -> m b) -> a -> m Value
+    eraseOutput f = fmap toValue . f
+
 
     vars = H.fromList []
 
     funcs = H.fromList
-        [ ("stat",        erase fn_stat)
+        [ ("tostr",       eraseOutput (return . coerceToString))
+        , ("readint",     eraseInput  readInt)
+        , ("stat",        erase fn_stat)
         , ("exists",      erase fn_exists)
         , ("isfile",      erase fn_isfile)
         , ("isdir",       erase fn_isdir)
@@ -111,6 +122,12 @@ mkBuiltins root =
         case Path.canonicalizeUnder root p of
             Just path -> return path
             Nothing   -> throwError (InvalidPathOp p "canonicalize")
+
+
+    readInt :: T.Text -> m Value
+    readInt s = case readMaybe (T.unpack s) of
+                    Just i  -> return (NumV i)
+                    Nothing -> return (StringV s)
 
 
     fn_stat :: T.Text -> m FSAnyNodeR

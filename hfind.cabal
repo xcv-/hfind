@@ -22,12 +22,12 @@ library
                        System.Posix.Find.Combinators,
                        System.Posix.Find.Lang.Builtins,
                        System.Posix.Find.Lang.Context,
+                       System.Posix.Find.Lang.Error,
                        System.Posix.Find.Lang.Eval,
                        System.Posix.Find.Lang.Parser,
                        System.Posix.Find.Lang.Predicate,
                        System.Posix.Find.Lang.Types,
                        System.Posix.Find.Lang.Types.AST,
-                       System.Posix.Find.Lang.Types.Error,
                        System.Posix.Find.Lang.Types.Value,
                        System.Posix.Find.Types,
                        System.Posix.Find.Walk,
@@ -52,7 +52,8 @@ library
                        vector,
                        bifunctors,
                        parsec,
-                       text-icu
+                       text-icu,
+                       wl-pprint-text
   default-language:    Haskell2010
   ghc-options:         -Wall -fwarn-incomplete-uni-patterns
 
@@ -71,6 +72,7 @@ executable hfind
                        raw-strings-qq,
                        mmorph,
                        text,
+                       text-icu,
                        hfind
   default-language:    Haskell2010
   ghc-options:         -Wall -fwarn-incomplete-uni-patterns

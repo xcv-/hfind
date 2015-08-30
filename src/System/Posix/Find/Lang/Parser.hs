@@ -22,7 +22,6 @@ import qualified Data.Text.ICU       as ICU
 import qualified Data.Text.ICU.Error as ICU
 
 import Text.Parsec
-import Text.Parsec.Expr
 import Text.Parsec.Pos
 import Text.Parsec.Text (Parser)
 import qualified Text.Parsec.Error as PE
@@ -50,7 +49,7 @@ langDef = Tok.LanguageDef
   , Tok.opStart = Tok.opStart langDef
   , Tok.opLetter = oneOf ":!#$%&*+./<=>?@\\^|-~"
   , Tok.reservedOpNames = ["==", "=~", "<=", ">=", "<", ">", "&&", "||"]
-  , Tok.reservedNames = ["true", "false", "not"]
+  , Tok.reservedNames = ["true", "false", "not", "scope"]
   , Tok.caseSensitive = True
   }
 
@@ -83,37 +82,60 @@ stringLiteral = T.pack <$> Tok.stringLiteral lang
 
 
 predicateValue :: forall pre. IsPred pre => Parser pre
-predicateValue = parens predicateValue
-             <|> try (negation   <?> "negation")
-             <|> try (binaryPred <?> "binary predicate")
-             <|> try (freeExpr   <?> "expression")
+predicateValue = parens predicate
+             <|> (scope    <?> "explicit scope")
+             <|> (negation <?> "negation")
+             <|> (exprPred <?> "expression predicate")
+             <?> "atomic predicate"
   where
-    negation :: Parser pre
-    negation = notP <$> (reserved "not" *> parens predicate)
+    scope :: Parser pre
+    scope = located $
+        scopeP <$> (reserved "scope" *> parens predicate)
 
-    binaryPred :: Parser pre
-    binaryPred = do
+    negation :: Parser pre
+    negation = located $
+        notP <$> (reserved "not" *> parens predicate)
+
+    exprPred :: Parser pre
+    exprPred = located $ do
         e1 <- expr
 
         optionMaybe comparator >>= \case
             Just op -> do
                 e2 <- expr
                 return (opP op e1 e2)
-            Nothing -> do
-                symbol "=~"
-                (rx, capMode) <- regex
-                return (matchP e1 rx capMode)
 
-    freeExpr :: Parser pre
-    freeExpr = exprP <$> expr
+            Nothing -> choice
+              [ do symbol "=~"
+                   (rx, capMode) <- regex
+                   return (matchP e1 rx capMode)
+              , return (exprP e1)
+              ]
 
+predicate :: forall pre. IsPred pre => Parser pre
+predicate = do
+    i1  <- getInput
+    loc <- getPosition
 
-predicate :: IsPred pre => Parser pre
-predicate = buildExpressionParser
-    [ [ Infix  (reservedOp "&&" $> andP) AssocLeft
-      , Infix  (reservedOp "||" $> orP)  AssocLeft
-      ]
-    ] predicateValue
+    p1  <- predicateValue
+
+    rest <- many (item i1 loc)
+
+    -- [op_rhs2, op_rhs3, ...] -> ... op_rhs3 (op_rhs2 p1)
+    return $ foldl' (\lhs op_rhs -> op_rhs lhs) p1 rest
+  where
+    item :: Src -> SourcePos -> Parser (pre -> pre)
+    item i1 loc = try $ do
+        op <- reservedOp "&&" $> andP
+          <|> reservedOp "||" $> orP
+
+        rhs <- predicateValue
+        ik  <- getInput
+
+        let src = T.take (T.length i1 - T.length ik) i1
+
+        return (\lhs -> op lhs rhs (src, loc))
+
 
 comparator :: Parser Op
 comparator = try (symbol "==" $> OpEQ)
@@ -125,49 +147,50 @@ comparator = try (symbol "==" $> OpEQ)
 
 expr :: forall expr. IsExpr expr => Parser expr
 expr = parens expr
-   <|> varE        <$> var
-   <|> litE        <$> try litNoString
-   <|> simplInterp <$> interp
-   <|> app
+   <|> choice
+         [ located $ varE        <$> var
+         , located $ simplInterp <$> interp
+         , located $ litE        <$> litNoString
+         , located $ app
+         ]
    <?> "expression"
   where
-    app :: Parser expr
+    app :: Parser (SrcLoc -> expr)
     app = appE <$> identifier <*> expr <?> "function application"
 
-    simplInterp :: [Either Text (ExprVar expr)] -> expr
+    simplInterp :: [Interp (ExprVar expr)] -> SrcLoc -> expr
     simplInterp pieces =
         case contract pieces of
-          []       -> litE (stringL "")
-          [Left s] -> litE (stringL s)
-          pieces'  -> interpE pieces'
+          []            -> \src -> litE (stringL "" src) src
+          [InterpLit s] -> \src -> litE (stringL s src)  src
+          pieces'       -> interpE pieces'
 
-    contract :: [Either Text (ExprVar expr)] -> [Either Text (ExprVar expr)]
+    contract :: [Interp (ExprVar expr)] -> [Interp (ExprVar expr)]
     contract [] = []
-    contract (Left "" : ps) = contract ps
+    contract (InterpLit "" : ps) = contract ps
     contract (p:ps) =
         case (p, contract ps) of
-          (Left s1, Left s2 : ps') -> Left (s1 <> s2) : ps'
-          (_, ps')                 -> p:ps'
+          (InterpLit s1, InterpLit s2 : ps') -> InterpLit (s1 <> s2) : ps'
+          (_, ps')                           -> p:ps'
 
-    interp :: Parser [Either Text (ExprVar expr)]
+    interp :: Parser [Interp (ExprVar expr)]
     interp = flip label "interpolated string" $
         either throwParseError return . parseInterp =<< stringLiteral
 
-    parseInterp :: Text -> Either (SourcePos -> ParseError)
-                                    [Either Text (ExprVar expr)]
+    parseInterp :: Text -> Either (SourcePos -> ParseError) [Interp (ExprVar expr)]
     parseInterp s =
         case T.break (=='$') s of
           (prefix, "") ->
-                return [Left prefix]
+                return [InterpLit prefix]
 
           (prefix, s')
             | "$$" `T.isPrefixOf` s' ->
-                fmap (Left (prefix `T.snoc` '$') :)
+                fmap (InterpLit (prefix `T.snoc` '$') :)
                      (parseInterp (T.drop 2 s'))
             | otherwise ->
                 case parseWithLeftovers varNoWhitespace "string literal" s' of
                   Right (v, s'') ->
-                      fmap ([Left prefix, Right v] ++)
+                      fmap ([InterpLit prefix, InterpVar v] ++)
                            (parseInterp s'')
                   Left e ->
                       let msg   = "Could not parse interpolated string"
@@ -220,10 +243,10 @@ regex = flip label "regular expression" $ do
 
 
 litNoString :: IsLit lit => Parser lit
-litNoString = boolL True     <$  reserved "true"
-          <|> boolL False    <$  reserved "false"
-          <|> numL           <$> integerLiteral
-          <?> "literal"
+litNoString = located (boolL True     <$  try (reserved "true")
+                   <|> boolL False    <$  try (reserved "false")
+                   <|> numL           <$> integerLiteral
+                   <?> "literal")
   where
     numLit = try date <|> try size <?> "numeric literal"
 
@@ -236,19 +259,18 @@ var = varNoWhitespace <* whitespace
   <?> "variable"
 
 varNoWhitespace :: IsVar var => Parser var
-varNoWhitespace = do
+varNoWhitespace = located $ do
     void (char '$')
 
     let rawVar = rxCapVar <$> rxCapIndex
              <|> namedVar <$> ident
+             <?> "variable name or regex capture index"
 
     between (symbol "{") (char '}') (rawVar <* whitespace)
       <|> rawVar
-      <?> "variable name or regex capture index"
   where
     rxCapIndex = do
         digits <- many1 (digitToInt <$> digit)
-
         return $ foldl' (\acc x -> acc*10 + x) 0 digits
 
     ident = do
@@ -259,6 +281,17 @@ varNoWhitespace = do
 
 
 -- low-level Text.Parsec.Prim-based utilities
+
+located :: Parser (SrcLoc -> a) -> Parser a
+located p = do
+    loc  <- getPosition
+    prev <- getInput
+    f    <- p
+    cur  <- getInput
+
+    let src = T.take (T.length prev - T.length cur) prev
+    return (f (src, loc))
+
 
 parseWithLeftovers :: Parser a
                    -> SourceName
