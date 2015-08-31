@@ -1,7 +1,7 @@
 hfind
 =====
 
-Filtering and pruning by already works!
+Filtering and pruning already works!
 
 To run it,
 ```
@@ -88,11 +88,51 @@ and if this fails as well, `$var` is looked up in the system environment.
 
 For a list of builtin functions, see [Builtins.hs](src/System/Posix/Find/Lang/Builtins.hs)
 
+
+Error reporting:
+----------------
+
+Some nice error reporting has been added. For example,
+
+Analyzer error:
+```
+$ dist/build/hfind/hfind src -if '$name =~ m|(.*)\.hs$| && isdir "$parentpath/$2"'
+
+Error at "string literal" (line 1, column 1): Variable $2 not found
+    In a regex capture variable: $2
+    In a string interpolation: "$parentpath/$2"
+    In a function application: isdir "$parentpath/$2"
+    In a conjunction (&&): $name =~ m|(.*)\.hs$| && isdir "$parentpath/$2"
+
+Defined variables:
+    $_currentnode
+
+Active regex: "(.*)\\.hs$"
+```
+
+Runtime error:
+```
+$ dist/build/hfind/hfind src -if '$name =~ m|(.*)\.hs$| && owner "$parentpath/$1" == $USER'
+
+Error at "argument #3" (line 1, column 26): Type error: 'fsnode' expected, but found 'string'
+    In a function application: owner "$parentpath/$1"
+    In operator (==): owner "$parentpath/$1" == $USER
+    In a conjunction (&&): $name =~ m|(.*)\.hs$| && owner "$parentpath/$1" == $USER
+
+Variable dump:
+    $_currentnode = "/home/[...]/hfind/src/System/Posix/Find/Combinators.hs"
+
+Active match: "(.*)\\.hs$"
+    $0 = "Combinators.hs"
+    $1 = "Combinators"
+```
+
+
 TODO:
 -----
 
-- *done* actually run commands, and make `print` a built-in special case that's the default
-- *done* review scope semantics
+- **done** actually run commands, and make `print` a built-in special case that's the default
+- **done** review scope semantics
 - size/time literals
 - evaluate performance (specially EvalT)
 - allow running the entire process asynchronously (chunked, customizable)
