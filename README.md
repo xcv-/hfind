@@ -131,8 +131,9 @@ Active match: "(.*)\\.hs$"
 TODO:
 -----
 
-- **done** actually run commands, and make `print` a built-in special case that's the default
+- **done** more detailed error messages with context, like GHC (in the second argument of...)
 - **done** review scope semantics
+- actually run commands, and make `print` a built-in special case that's the default
 - size/time literals
 - evaluate performance (specially EvalT)
 - allow running the entire process asynchronously (chunked, customizable)
