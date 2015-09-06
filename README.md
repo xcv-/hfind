@@ -15,7 +15,18 @@ dist/build/hfind/hfind -h  # prints usage
 Some examples:
 --------------
 
-Find all files with the `.hs` extension in the `src` directory, following symlinks (`-L`).
+
+- Finding git repositories (following symlinks, `-L`)
+```
+$ dist/build/hfind/hfind -L ~ -prune '$hidden' -if '$type == "d" && isdir "$path/.git"'
+```
+
+Equivalent find command:
+```
+$ dist/build/hfind/hfind -L ~ -name '.*' -prune -o -type d -exec test -d '{}/.git' \;
+```
+
+- Find all files with the `.hs` extension in the `src` directory, following symlinks.
 ```
 $ dist/build/hfind/hfind -L src -if '$type == "f" && $name =~ m|\.hs$|'
 
@@ -35,7 +46,12 @@ $ dist/build/hfind/hfind -L src -if '$type == "f" && $name =~ m|\.hs$|'
 /home/[...]/hfind/src/System/Posix/Text/Path.hs
 ```
 
-Find all `.hs` files in src such that there is a directory with the same name
+Equivalent find command:
+```
+$ dist/build/hfind/hfind -L src -type f -name '*.hs'
+```
+
+- Find all `.hs` files in src such that there is a directory with the same name
 except the `.hs` extension in the same directory
 ```
 $ dist/build/hfind/hfind src -if '$name =~ m|(.*)\.hs$| && isdir "$parentpath/$1"'
@@ -44,7 +60,10 @@ $ dist/build/hfind/hfind src -if '$name =~ m|(.*)\.hs$| && isdir "$parentpath/$1
 /home/[...]/hfind/src/System/Posix/Find.hs
 ```
 
-Find all regular files in `dist/` that don't have a dot in the name, it starts
+Equivalent find command: *(none)*
+
+
+- Find all regular files in `dist/` that don't have a dot in the name, it starts
 with a lowercase letter. Plus, the owner group must have the same execution
 permission as the rest of the users.
 
@@ -59,6 +78,8 @@ $ dist/build/hfind/hfind dist \
 /home/[...]/hfind/dist/build/spec/spec
 /home/[...]/hfind/dist/setup-config
 ```
+
+Equivalent find command: *(?)*
 
 List libraries built by ghc >=7.10 in `dist/` with executable permissions
 (naive check)
@@ -78,6 +99,8 @@ $ me=$UID we=$GID dist/build/hfind/hfind dist -if '
 /home/[...]/hfind/dist/build/libHShfind-0.1.0.0-D1R5LGKLZgw0oun3dxLEOZ-ghc7.10.2.so
 /home/[...]/hfind/dist/build/libHShfind-0.1.0.0-HrfH6DGM3FjLRrBEMCUfBr-ghc7.10.2.so
 ```
+
+Equivalent find command: *(none)*
 
 Note that captures inside `not (...)` or `(... || ...)`, won't be available
 from the outside (`...` is not necessarily true), so these can be used as a

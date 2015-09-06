@@ -20,10 +20,11 @@ library
   hs-source-dirs:      src
   exposed-modules:     System.Posix.Find,
                        System.Posix.Find.Combinators,
+                       System.Posix.Find.Lang.Baker,
                        System.Posix.Find.Lang.Builtins,
-                       System.Posix.Find.Lang.Context,
                        System.Posix.Find.Lang.Error,
                        System.Posix.Find.Lang.Eval,
+                       System.Posix.Find.Lang.Interp,
                        System.Posix.Find.Lang.Parser,
                        System.Posix.Find.Lang.Predicate,
                        System.Posix.Find.Lang.Types,
@@ -60,7 +61,8 @@ library
 executable hfind
   hs-source-dirs:      cli
   main-is:             Main.hs
-  other-modules:       System.Posix.Find.Main
+  other-modules:       System.Posix.Find.ArgParse,
+                       System.Posix.Find.Main
   build-depends:       base >=4.8 && <4.9,
                        exceptions >=0.8 && <0.9,
                        filepath >=1.4 && <1.5,
@@ -70,6 +72,7 @@ executable hfind
                        directory >=1.2 && <1.3,
                        pipes >=4.1 && <4.2,
                        raw-strings-qq,
+                       bifunctors,
                        mmorph,
                        text,
                        text-icu,

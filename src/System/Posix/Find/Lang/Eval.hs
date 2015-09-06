@@ -1,209 +1,193 @@
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE RankNTypes #-}
 module System.Posix.Find.Lang.Eval
-  ( LitBaker,  runLitBaker
-  , VarBaker,  runVarBaker
-  , ExprBaker, runExprBaker
-  , PredBaker, runPredBaker
-  ) where
+    ( Eval
+    , EvalContext
+    , ctxGetValues, ctxGetActiveMatch, ctxGetBacktrace, ctxGetBakerContext
+    , newContext
+    , runEvalT
+    , wrapEvalT
+    , readonly
+    , getVarValue
+    , setVarValue
+    , getCaptureValue
+    , setCaptures
+    , evalWithin
+    ) where
 
-import Data.Monoid
+import Control.Monad.Trans.Except (throwE)
 
-import Control.Applicative
+import Control.Monad.Catch (MonadThrow, MonadCatch, catchAll)
 import Control.Monad.Except
+import Control.Monad.Reader
 
-import qualified Data.Text.Encoding as T
+import Control.Monad.Morph
+
+import Data.Text (Text)
+import qualified Data.Text as T
 
 import qualified Data.Text.ICU as ICU
 
-import System.Posix.Find.Types (FSAnyNodeR)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 
-import System.Posix.Find.Lang.Types
-import System.Posix.Find.Lang.Context (Baker, Eval)
-import System.Posix.Find.Lang.Error   (VarNotFoundError(..),
-                                       RuntimeError(..), expectedButFound)
+import Data.Vector.Mutable (IOVector)
+import qualified Data.Vector         as V
+import qualified Data.Vector.Mutable as V
 
-import qualified System.Posix.Find.Lang.Context as Ctx
+import System.Posix.Find.Lang.Types (Value(..), RxCaptureMode(..))
 
-
-type EvalValue = FSAnyNodeR -> Eval Value
-type EvalBool  = FSAnyNodeR -> Eval Bool
-
-newtype LitBaker  = LitBaker  { runLitBaker  :: Baker Value     }
-newtype VarBaker  = VarBaker  { runVarBaker  :: Baker EvalValue }
-newtype ExprBaker = ExprBaker { runExprBaker :: Baker EvalValue }
-newtype PredBaker = PredBaker { runPredBaker :: Baker EvalBool  }
+import System.Posix.Find.Lang.Baker (VarId)
+import qualified System.Posix.Find.Lang.Baker as Baker
+import qualified System.Posix.Find.Lang.Error as Err
 
 
-instance IsLit LitBaker where
-    boolL   b _ = LitBaker $ return (BoolV b)
-    numL    n _ = LitBaker $ return (NumV n)
-    stringL s _ = LitBaker $ return (StringV s)
 
-instance IsVar VarBaker where
-    namedVar name src = VarBaker $ Ctx.frame "a variable" src $
-        Ctx.lookupBuiltinVar name >>= \case
-            -- it's a built-in variable
-            Just b  -> return b
+data EvalContext = EvalContext
+    { ctxValues       :: IOVector Value -- reversed
+    , ctxActiveMatch  :: IORef (Maybe ICU.Match)
+    , ctxBacktrace    :: IORef Err.Backtrace
+    , ctxBakerContext :: Baker.BakingContext
+    }
 
-            -- $f is sugar for f $_currentnode
-            Nothing -> Ctx.lookupBuiltinFunc name >>= \case
-                Just f  -> return (f . NodeV)
+newContext :: Baker.BakingContext -> IO EvalContext
+newContext ctx = do
+    vals        <- V.new (Baker.ctxGetNumVars ctx)
+    activeMatch <- newIORef Nothing
+    backtrace   <- newIORef Err.emptyBacktrace
 
-                -- a manually defined variable
-                Nothing -> Ctx.getVarId name >>= \case
-                    Just i -> return (\_ -> Ctx.getVarValue i)
-
-                    -- fall back to environment variables
-                    Nothing -> Ctx.lookupEnv (T.encodeUtf8 name) >>= \case
-                        Just value -> return (\_ -> return value)
-                        Nothing    -> throwError (VarNotFound (NamedVar name))
-
-    rxCapVar i src = VarBaker $ Ctx.frame "a regex capture variable" src $ do
-        ncap <- Ctx.getNumCaptures
-        if i < ncap
-          then return (\_ -> StringV <$> Ctx.getCaptureValue i)
-          else throwError (VarNotFound (RxCapVar i))
+    return (EvalContext vals activeMatch backtrace ctx)
 
 
-instance IsExpr ExprBaker where
-    type ExprLit ExprBaker = LitBaker
-    type ExprVar ExprBaker = VarBaker
+ctxGetValues :: EvalContext -> IO [Value]
+ctxGetValues ctx = do
+    values <- V.freeze (ctxValues ctx)
+    return (V.toList values)
 
-    litE (LitBaker mv) _ = ExprBaker $ do
-        (!v) <- mv
-        return (\_ -> return v)
+ctxGetActiveMatch :: EvalContext -> IO (Maybe ICU.Match)
+ctxGetActiveMatch = readIORef . ctxActiveMatch
 
-    varE (VarBaker mv) _ = ExprBaker mv
+ctxGetBacktrace :: EvalContext -> IO Err.Backtrace
+ctxGetBacktrace = readIORef . ctxBacktrace
 
-    appE fname (ExprBaker me) src =
-        ExprBaker $ Ctx.frame "a function application" src $ do
-            (!e) <- me
-
-            bt <- Ctx.getBacktrace
-
-            Ctx.lookupBuiltinFunc fname >>= \case
-                Just f  -> return (Ctx.evalWithin bt . f <=< e)
-                Nothing -> throwError (VarNotFound (NamedVar fname))
+ctxGetBakerContext :: EvalContext -> Baker.BakingContext
+ctxGetBakerContext = ctxBakerContext
 
 
-    interpE pieces src = ExprBaker $ Ctx.frame "a string interpolation" src $ do
-        values <- forM pieces $ \case
-                      InterpVar (VarBaker mv) -> InterpVar <$> mv
-                      InterpLit text          -> return (InterpLit text)
 
-        return $ \n -> do
-            strs <- mapM (toString n) values
+type Eval = EvalT IO
 
-            return (StringV (mconcat strs))
-      where
-        toString _ (InterpLit s) = return s
-        toString n (InterpVar e) = coerceToString <$> e n
+type instance Baker.EvalMonad Baker.BakerT = Eval
+
+newtype EvalT m a =
+    EvalT (ExceptT Err.RuntimeError
+            (ReaderT EvalContext m)
+              a)
+    deriving (Functor, Applicative, Monad,
+              MonadIO,
+              MonadError Err.RuntimeError,
+              MonadThrow, MonadCatch)
 
 
-instance IsPred PredBaker where
-    type PredExpr PredBaker = ExprBaker
+instance MonadTrans EvalT where
+    lift = EvalT . lift . lift
 
-    scopeP (PredBaker mp) src =
-        PredBaker $ Ctx.frame "inner scope (scope)" src $ do
-            (!p) <- Ctx.bakeReadonly mp
+instance MFunctor EvalT where
+    hoist f (EvalT m) = EvalT $ hoist (hoist f) m
 
-            return $! Ctx.evalReadonly . p
 
-    notP (PredBaker mp) src =
-        PredBaker $ Ctx.frame "a negation (not)" src $ do
-            -- negative predicates cannot add things to scope
-            (!p) <- Ctx.bakeReadonly mp
 
-            return $! fmap not . Ctx.evalReadonly . p
+-- Eval primitives --------------------------------------------------
 
-    andP (PredBaker mp1) (PredBaker mp2) src =
-        PredBaker $ Ctx.frame "a conjunction (&&)" src $ do
-            (!p1) <- mp1
-            (!p2) <- mp2
 
-            return $ \n -> do
-                r <- p1 n
-                if r
-                  then p2 n
-                  else return False
+runEvalT :: MonadIO m
+         => EvalContext
+         -> EvalT m a
+         -> ExceptT (EvalContext, Err.RuntimeError) m a
+runEvalT ctx (EvalT m) = do
+    res <- lift $ runReaderT (runExceptT m) ctx
+    case res of
+        Left err -> throwE (ctx, err)
+        Right a  -> return a
 
-    orP (PredBaker mp1) (PredBaker mp2) src =
-        PredBaker $ Ctx.frame "a disjunction (||)" src $ do
-            -- we don't know which one will be accepted yet
-            -- in the future we may want to intersect all possible results
-            (!p1) <- Ctx.bakeReadonly mp1
-            (!p2) <- Ctx.bakeReadonly mp2
 
-            return $ \n -> Ctx.evalReadonly $ do
-                r <- p1 n
-                if r
-                  then return True
-                  else p2 n
+wrapEvalT :: Monad m
+          => ExceptT (EvalContext, Err.RuntimeError) m a
+          -> EvalT m a
+wrapEvalT m = EvalT $ ExceptT $ ReaderT $ \_ -> do
+    r <- runExceptT m
+    case r of
+        Left (_, e) -> return (Left e)
+        Right a     -> return (Right a)
 
-    exprP (ExprBaker me) _ = PredBaker $ do
-        (!e) <- me
-        return $ \n -> do
-            val <- e n
-            case val of
-                BoolV b -> return b
-                _       -> throwError $
-                  typeName TBool `ExpectedButFound` typeNameOf val
 
-    opP op (ExprBaker me1) (ExprBaker me2) src =
-        let opName = "(" <> opSymbol op <> ")" in
 
-        PredBaker $ Ctx.frame ("operator " <> opName) src $ do
-            (!e1) <- me1
-            (!e2) <- me2
+readonly :: MonadIO m => EvalT m a -> EvalT m a
+readonly (EvalT m) = EvalT $ do
+    -- variables may change in the action, but the current language does not
+    -- allow it in predicates and this is just used in Eval.hs, so we're
+    -- safe for now
+    ctx <- ask
 
-            let eval n = liftA2 (,) (e1 n) (e2 n)
+    match <- liftIO $ readIORef (ctxActiveMatch ctx)
+    bt    <- liftIO $ readIORef (ctxBacktrace ctx)
 
-            let evalNumeric = eval >=> expect TNum TNum >=> \case
-                    (NumV a, NumV b) -> return (a, b)
-                    _ -> error "System.Posix.Find.Lang.Eval.evalNumeric"
+    a <- m
 
-            bt <- Ctx.getBacktrace
+    liftIO $ writeIORef (ctxActiveMatch ctx) match
+    liftIO $ writeIORef (ctxBacktrace   ctx) bt
 
-            return $! (Ctx.evalWithin bt .) $!
-                case op of
-                    OpEQ -> eval >=> \case
-                        (BoolV   a, BoolV   b) -> return (a == b)
-                        (NumV    a, NumV    b) -> return (a == b)
-                        (StringV a, StringV b) -> return (a == b)
-                        (NodeV   a, NodeV   b) -> return (a == b)
-                        (a, b) -> throwError $
-                            "comparable pair" `ExpectedButFound`
-                              (typeNameOf a <> " and " <> typeNameOf b)
+    return a
 
-                    OpLT -> evalNumeric >=> \(a, b) -> return (a < b)
-                    OpLE -> evalNumeric >=> \(a, b) -> return (a <= b)
-                    OpGT -> evalNumeric >=> \(a, b) -> return (a > b)
-                    OpGE -> evalNumeric >=> \(a, b) -> return (a >= b)
-      where
-        expect :: ValueType -> ValueType -> (Value, Value) -> Eval (Value, Value)
-        expect t1 t2 (a, b)
-          | t1 /= typeOf a = throwError $ t1 `expectedButFound` typeOf a
-          | t2 /= typeOf b = throwError $ t2 `expectedButFound` typeOf b
-          | otherwise      = return (a,b)
 
-    matchP (ExprBaker me) rx capMode src =
-        PredBaker $ Ctx.frame "a regex match" src $ do
-            (!e) <- me
-            Ctx.updateNumCaptures capMode rx
+getVarValue :: (MonadIO m, MonadCatch m) => VarId -> EvalT m Value
+getVarValue i = do
+    vals <- EvalT $ asks ctxValues
 
-            return $ \n -> do
-                s <- coerceToString <$> e n
+    do (!val) <- liftIO (V.read vals (Baker.varIdNum i))
+       return val
+    `catchAll` (throwError . Err.NativeError)
 
-                case ICU.find rx s of
-                    Nothing    -> return False
-                    Just match -> do
-                        Ctx.setCaptures capMode match
-                        return True
+
+setVarValue :: (MonadIO m, MonadCatch m) => VarId -> Value -> EvalT m ()
+setVarValue i val = do
+    vals <- EvalT $ asks ctxValues
+
+    liftIO (V.write vals (Baker.varIdNum i) val)
+    `catchAll` (throwError . Err.NativeError)
+
+
+getCaptureValue :: MonadIO m => Int -> EvalT m Text
+getCaptureValue i = EvalT $ do
+    Just match <- liftIO . readIORef =<< asks ctxActiveMatch
+
+    case ICU.group i match of
+        Just text -> return text
+        Nothing ->
+            error $ "getCaptureValue: could not find $" ++ show i
+                      ++ " of " ++ T.unpack (ICU.pattern match)
+
+
+setCaptures :: MonadIO m => RxCaptureMode -> ICU.Match -> EvalT m ()
+setCaptures NoCapture _     = return ()
+setCaptures Capture   match = EvalT $ do
+    activeMatch <- asks ctxActiveMatch
+
+    liftIO $ writeIORef activeMatch $! Just $! match
+
+
+evalWithin :: MonadIO m => Err.Backtrace -> EvalT m a -> EvalT m a
+evalWithin bt (EvalT ma) = EvalT $ do
+    btRef <- asks ctxBacktrace
+    prev <- liftIO $ readIORef btRef
+
+    liftIO $ writeIORef btRef bt
+    a <- ma
+    liftIO $ writeIORef btRef prev
+
+    return a
+

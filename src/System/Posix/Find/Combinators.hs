@@ -32,6 +32,23 @@ bimapM mffp mfdp (DirP dp mbs) = do
     dp' <- mfdp dp
     return $ DirP dp' (mbs >-> P.mapM (bimapM mffp mfdp))
 
+bimapM_ :: Monad m
+        => (fp -> m ())
+        -> (dp -> m ())
+        -> Walk m fp dp
+        -> m (Walk m fp dp)
+bimapM_ mffp _    n@(FileP fp)    = n <$ mffp fp
+bimapM_ mffp mfdp   (DirP dp mbs) = do
+    mfdp dp
+    return $ DirP dp (mbs >-> P.mapM (bimapM_ mffp mfdp))
+
+
+hoistWalk :: (Monad m, Monad n)
+          => (forall a. m a -> n a) -> Walk m fp dp -> Walk n fp dp
+hoistWalk _ (FileP fp)  = FileP fp
+hoistWalk f (DirP dp p) = DirP dp (hoist f p >-> P.map (hoistWalk f))
+
+
 
 type Transform fp dp m = Pipe (Walk m fp dp) (Walk m fp dp) m ()
 type TransformP  m     = Pipe (WalkP m)      (WalkP m)      m ()
@@ -42,6 +59,7 @@ type TransformR  m     = Pipe (WalkR  m)     (WalkR  m)     m ()
 
 type EntryTransformN m s = Pipe (NodeListEntry s) (NodeListEntry s) m ()
 type EntryTransformR m   = EntryTransformN m 'Resolved
+
 
 
 mapChildren :: Monad m
