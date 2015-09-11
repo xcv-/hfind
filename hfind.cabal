@@ -34,27 +34,9 @@ library
                        System.Posix.Find.Walk,
                        System.Posix.Text.Path
   -- other-modules:
-  other-extensions:    TypeFamilies, Rank2Types, KindSignatures, GADTs,
-                       DataKinds, LambdaCase, TemplateHaskell, FlexibleInstances,
-                       DeriveDataTypeable, ScopedTypeVariables, FlexibleContexts,
-                       GeneralizedNewtypeDeriving
-  build-depends:       base >=4.8 && <4.9,
-                       exceptions >=0.8 && <0.9,
-                       filepath >=1.4 && <1.5,
-                       unix >=2.7 && <2.8,
-                       transformers >=0.4 && <0.5,
-                       directory >=1.2 && <1.3,
-                       pipes >=4.1 && <4.2,
-                       mtl,
-                       mmorph,
-                       unordered-containers,
-                       bytestring,
-                       text,
-                       vector,
-                       bifunctors,
-                       parsec,
-                       text-icu,
-                       wl-pprint-text
+  build-depends:       base, exceptions, bifunctors, transformers, mtl, mmorph,
+                       unordered-containers, bytestring, vector, text, text-icu,
+                       parsec, pipes, filepath, directory, unix, wl-pprint-text
   default-language:    Haskell2010
   ghc-options:         -Wall -fwarn-incomplete-uni-patterns
 
@@ -63,19 +45,9 @@ executable hfind
   main-is:             Main.hs
   other-modules:       System.Posix.Find.ArgParse,
                        System.Posix.Find.Main
-  build-depends:       base >=4.8 && <4.9,
-                       exceptions >=0.8 && <0.9,
-                       filepath >=1.4 && <1.5,
-                       unix >=2.7 && <2.8,
-                       transformers >=0.4 && <0.5,
-                       mtl >=2.2 && <2.3,
-                       directory >=1.2 && <1.3,
-                       pipes >=4.1 && <4.2,
-                       raw-strings-qq,
-                       bifunctors,
-                       mmorph,
-                       text,
-                       text-icu,
+  build-depends:       base, exceptions, bifunctors, transformers, mtl, mmorph,
+                       text, text-icu,
+                       pipes, filepath, directory, unix, raw-strings-qq,
                        hfind
   default-language:    Haskell2010
   ghc-options:         -Wall -fwarn-incomplete-uni-patterns
@@ -87,6 +59,8 @@ test-suite spec
 
   main-is:             Spec.hs
 
-  build-depends:       base, deepseq, pipes, text, mtl, bifunctors,
-                       raw-strings-qq, text-icu, hspec, QuickCheck,
-                       quickcheck-instances, hfind
+  default-language:    Haskell2010
+
+  build-depends:       base, deepseq, bifunctors, mtl,
+                       text, text-icu, raw-strings-qq, pipes,
+                       hspec, QuickCheck, quickcheck-instances, hfind
