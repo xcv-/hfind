@@ -5,11 +5,8 @@ Filtering and pruning already works!
 
 To run it,
 ```
-cabal sandbox init
-cabal install --dependencies-only
-cabal configure
-cabal build
-dist/build/hfind/hfind -h  # prints usage
+stack build
+./hfind -h  # prints usage
 ```
 
 Some examples:
@@ -18,23 +15,24 @@ Some examples:
 
 - Finding git repositories (following symlinks, `-L`)
 ```
-$ dist/build/hfind/hfind -L ~ -prune '$hidden' -if '$type == "d" && isdir "$path/.git"'
+$ ./hfind -L ~ -prune '$hidden' -if '$type == "d" && isdir "$path/.git"'
 ```
 
 Equivalent find command:
 ```
-$ dist/build/hfind/hfind -L ~ -name '.*' -prune -o -type d -exec test -d '{}/.git' \;
+$ ./hfind -L ~ -name '.*' -prune -o -type d -exec test -d '{}/.git' \;
 ```
 
 - Find all files with the `.hs` extension in the `src` directory, following symlinks.
 ```
-$ dist/build/hfind/hfind -L src -if '$type == "f" && $name =~ m|\.hs$|'
+$ ./hfind -L src -if '$type == "f" && $name =~ m|\.hs$|'
 
 /home/[...]/hfind/src/System/Posix/Find/Combinators.hs
+/home/[...]/hfind/src/System/Posix/Find/Lang/Baker.hs
 /home/[...]/hfind/src/System/Posix/Find/Lang/Builtins.hs
-/home/[...]/hfind/src/System/Posix/Find/Lang/Context.hs
 /home/[...]/hfind/src/System/Posix/Find/Lang/Error.hs
 /home/[...]/hfind/src/System/Posix/Find/Lang/Eval.hs
+/home/[...]/hfind/src/System/Posix/Find/Lang/Interp.hs
 /home/[...]/hfind/src/System/Posix/Find/Lang/Parser.hs
 /home/[...]/hfind/src/System/Posix/Find/Lang/Predicate.hs
 /home/[...]/hfind/src/System/Posix/Find/Lang/Types/AST.hs
@@ -48,13 +46,13 @@ $ dist/build/hfind/hfind -L src -if '$type == "f" && $name =~ m|\.hs$|'
 
 Equivalent find command:
 ```
-$ dist/build/hfind/hfind -L src -type f -name '*.hs'
+$ ./hfind -L src -type f -name '*.hs'
 ```
 
 - Find all `.hs` files in src such that there is a directory with the same name
 except the `.hs` extension in the same directory
 ```
-$ dist/build/hfind/hfind src -if '$name =~ m|(.*)\.hs$| && isdir "$parentpath/$1"'
+$ ./hfind src -if '$name =~ m|(.*)\.hs$| && isdir "$parentpath/$1"'
 
 /home/[...]/hfind/src/System/Posix/Lang/Types.hs
 /home/[...]/hfind/src/System/Posix/Find.hs
@@ -63,28 +61,34 @@ $ dist/build/hfind/hfind src -if '$name =~ m|(.*)\.hs$| && isdir "$parentpath/$1
 Equivalent find command: *(none)*
 
 
-- Find all regular files in `dist/` that don't have a dot in the name, it starts
-with a lowercase letter. Plus, the owner group must have the same execution
-permission as the rest of the users.
+- Find all regular files in `.stack-work/` that don't have a dot in the name,
+  it starts with a lowercase letter. Plus, the owner group must have the same
+  execution permission as the rest of the users.
 
 ```
-$ dist/build/hfind/hfind dist \
+$ ./hfind .stack-work \
     -if '$type == "f"'                         \
     -if 'not ($name =~ m/\./)'                 \
     -if '$name =~ m/^[a-z]/'                   \
     -if '$perms =~ m/... ..(.) ..\1/x'
 
-/home/[...]/hfind/dist/build/hfind/hfind
-/home/[...]/hfind/dist/build/spec/spec
-/home/[...]/hfind/dist/setup-config
+/home/[...]/hfind/.stack-work/dist/i386-linux/Cabal-1.22.4.0/build/hfind/hfind
+/home/[...]/hfind/.stack-work/dist/i386-linux/Cabal-1.22.4.0/build/spec/spec
+/home/[...]/hfind/.stack-work/dist/i386-linux/Cabal-1.22.4.0/setup-config
+/home/[...]/hfind/.stack-work/dist/i386-linux/Cabal-1.22.4.0/stack-build-cache
+/home/[...]/hfind/.stack-work/dist/i386-linux/Cabal-1.22.4.0/stack-cabal-mod
+/home/[...]/hfind/.stack-work/dist/i386-linux/Cabal-1.22.4.0/stack-config-cache
+/home/[...]/hfind/.stack-work/dist/i386-linux/Cabal-1.22.4.0/stack-test-built
+/home/[...]/hfind/.stack-work/dist/i386-linux/Cabal-1.22.4.0/stack-test-success
+/home/[...]/hfind/.stack-work/install/i386-linux/lts-3.4/7.10.2/bin/hfind
 ```
 
 Equivalent find command: *(?)*
 
-List libraries built by ghc >=7.10 in `dist/` with executable permissions
+List libraries built by ghc >=7.10 in `.stack-work/` with executable permissions
 (naive check)
 ```
-$ me=$UID we=$GID dist/build/hfind/hfind dist -if '
+$ me=$UID we=$GID ./hfind .stack-work -if '
        $type == "f"
     && $name =~ m/lib.*-ghc(\d+)\.(\d+)\.\d+\.so/
     && scope ( $perms =~ m/..(.) ..(.) ..(.)/x
@@ -95,9 +99,9 @@ $ me=$UID we=$GID dist/build/hfind/hfind dist -if '
              )
     && ($1 == "7" && readint $2 >= 10 || readint $1 > 7)'
 
-/home/[...]/hfind/dist/build/libHShfind-0.1.0.0-48aLcpNTab3EiWEDW5Bwk0-ghc7.10.2.so
-/home/[...]/hfind/dist/build/libHShfind-0.1.0.0-D1R5LGKLZgw0oun3dxLEOZ-ghc7.10.2.so
-/home/[...]/hfind/dist/build/libHShfind-0.1.0.0-HrfH6DGM3FjLRrBEMCUfBr-ghc7.10.2.so
+/home/[...]/hfind/.stack-work/dist/i386-linux/Cabal-1.22.4.0/build/libHShfind-0.1.0.0-1bOTNpdR5JrL3TUNaCEMap-ghc7.10.2.so
+/home/[...]/hfind/.stack-work/dist/i386-linux/Cabal-1.22.4.0/build/libHShfind-0.1.0.0-BI81816hJ183CedkmYUeim-ghc7.10.2.so
+/home/[...]/hfind/.stack-work/install/i386-linux/lts-3.4/7.10.2/lib/i386-linux-ghc-7.10.2/hfind-0.1.0.0-BI81816hJ183CedkmYUeim/libHShfind-0.1.0.0-BI81816hJ183CedkmYUeim-ghc7.10.2.so
 ```
 
 Equivalent find command: *(none)*
@@ -119,7 +123,7 @@ Some nice error reporting has been added. For example,
 
 Analyzer error:
 ```
-$ dist/build/hfind/hfind src -if '$name =~ m|(.*)\.hs$| && isdir "$parentpath/$2"'
+$ ./hfind src -if '$name =~ m|(.*)\.hs$| && isdir "$parentpath/$2"'
 
 Error at "string literal" (line 1, column 1): Variable $2 not found
     In a regex capture variable: $2
@@ -135,7 +139,7 @@ Active regex: "(.*)\\.hs$"
 
 Runtime error:
 ```
-$ dist/build/hfind/hfind src -if '$name =~ m|(.*)\.hs$| && owner "$parentpath/$1" == $USER'
+$ ./hfind src -if '$name =~ m|(.*)\.hs$| && owner "$parentpath/$1" == $USER'
 
 Error at "argument #3" (line 1, column 26): Type error: 'fsnode' expected, but found 'string'
     In a function application: owner "$parentpath/$1"
