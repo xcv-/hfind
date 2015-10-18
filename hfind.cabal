@@ -20,13 +20,13 @@ library
   hs-source-dirs:      src
   exposed-modules:     System.Posix.Find,
                        System.Posix.Find.Combinators,
+                       System.Posix.Find.Lang.BakeParse,
                        System.Posix.Find.Lang.Baker,
                        System.Posix.Find.Lang.Builtins,
                        System.Posix.Find.Lang.Error,
                        System.Posix.Find.Lang.Eval,
                        System.Posix.Find.Lang.Interp,
                        System.Posix.Find.Lang.Parser,
-                       System.Posix.Find.Lang.Predicate,
                        System.Posix.Find.Lang.Types,
                        System.Posix.Find.Lang.Types.AST,
                        System.Posix.Find.Lang.Types.Value,
@@ -56,6 +56,11 @@ test-suite spec
   type:                exitcode-stdio-1.0
 
   hs-source-dirs:      test
+
+  other-modules:       SpecHelper,
+                       System.Posix.Find.CombinatorsSpec,
+                       System.Posix.Text.PathSpec,
+                       System.Posix.Find.Lang.ParserSpec
 
   main-is:             Spec.hs
 

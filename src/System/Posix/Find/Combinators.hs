@@ -60,6 +60,9 @@ type TransformR  m     = Pipe (WalkR  m)     (WalkR  m)     m ()
 type EntryTransformN m s = Pipe (NodeListEntry s) (NodeListEntry s) m ()
 type EntryTransformR m   = EntryTransformN m 'Resolved
 
+type EntryConsumerN m s = Consumer (NodeListEntry s) m ()
+type EntryConsumerR m   = EntryConsumerN m 'Resolved
+
 
 
 mapChildren :: Monad m

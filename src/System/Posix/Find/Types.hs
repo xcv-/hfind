@@ -12,6 +12,8 @@ import Data.Bifunctor
 import Data.Bifoldable
 import Data.Bitraversable
 
+import Data.Text (Text)
+
 import Data.Typeable (Typeable)
 
 import Control.Monad.Catch (Exception)
@@ -22,7 +24,10 @@ import qualified Pipes.Prelude as P
 import System.Posix.Files (FileStatus)
 import qualified System.Posix.Files as Posix
 
-import System.Posix.Text.Path
+import System.Posix.Text.Path (Path, Abs, File, Dir, RawPath,
+                               PathType(..), IsPathType,
+                               Link(..))
+import qualified System.Posix.Text.Path as Path
 
 
 -- too useful to put anywhere else
@@ -121,6 +126,10 @@ data ListEntry fp dp = FileEntry fp | DirEntry dp
 type PathListEntry   = ListEntry (Path Abs File) (Path Abs Dir)
 type NodeListEntry s = ListEntry (FSNode File s) (FSNode Dir s)
 type NodeListEntryR  = NodeListEntry 'Resolved
+
+entryRawPath :: NodeListEntryR -> Text
+entryRawPath (FileEntry fp) = Path.toText (nodePath fp)
+entryRawPath (DirEntry dp)  = Path.toText (nodePath dp)
 
 instance (Show fp, Show dp) => Show (ListEntry fp dp) where
     show (DirEntry  p) = show p

@@ -8,7 +8,7 @@
 {-# LANGUAGE TypeFamilies #-}
 module System.Posix.Find.ArgParse where
 
-import Control.Monad              (when, forM, forM_)
+import Control.Monad              (when, forM, forM_, (<=<))
 import Control.Monad.Trans.Except (ExceptT(..), Except, throwE)
 import Control.Monad.Morph        (hoist, generalize)
 import Control.Monad.IO.Class     (liftIO)
@@ -40,8 +40,10 @@ import System.Posix.Find.Lang.Eval  (Eval)
 
 import qualified System.Posix.Find.Lang.Baker as Baker
 
-import System.Posix.Find.Lang.Predicate (parseFilterPredicate,
-                                         parsePrunePredicate)
+import System.Posix.Find.Lang.BakeParse (parseFilterPredicate,
+                                         parsePrunePredicate,
+                                         parseStringInterp,
+                                         parseCmdLine)
 
 import qualified System.Posix.Find.Lang.Error as Err
 
@@ -57,6 +59,7 @@ data Result = Result
     , treeTransform :: C.TransformR Eval
     , listContext   :: Baker.BakingContext
     , listTransform :: C.EntryTransformR Eval
+    , listConsumer  :: C.EntryConsumerR Eval
     }
 
 type ParseState = (Int, [String])
@@ -114,6 +117,44 @@ parseListTransforms (i, "-if":expr:args) = do
 parseListTransforms state = return (state, Pipes.cat)
 
 
+parseConsumer :: ParseState
+              -> BakerT (Except String) (ParseState, C.EntryConsumerR Eval)
+parseConsumer (i, []) =
+    return ( (i, [])
+           , C.asPaths
+               >-> C.asFiles
+               >-> C.plainText
+               >-> Pipes.mapM_ (liftIO . TextIO.putStrLn)
+           )
+
+parseConsumer (i, "-print":fmt:args) = do
+    let sourceName = "argument #" ++ show (i+1)
+    format <- parseStringInterp sourceName fmt
+
+    (st', consumer) <- if null args
+                         then return ((i+2, args), Pipes.drain)
+                         else parseConsumer (i+2, args)
+    return ( st'
+           , Pipes.chain (liftIO . TextIO.putStrLn <=< format)
+               >-> consumer
+           )
+
+parseConsumer (i, "-exec":args) = do
+    let sources = zip ["argument #" ++ show j | j <- [i+1..]]
+                      args
+    cmd <- parseCmdLine sources
+
+    return ( (i+1 + length args, [])
+           , Pipes.mapM_ (liftIO <=< cmd)
+           )
+
+parseConsumer (i, "-nop":args)
+  | null args = return ((i+1, args), Pipes.drain)
+  | otherwise = parseConsumer (i+2, args)
+
+parseConsumer (i, args) =
+    return ((i, args), Pipes.drain)
+
 
 parseArgs :: [String] -> ExceptT String IO [Result]
 parseArgs args = do
@@ -129,9 +170,12 @@ parseArgs args = do
         ((state, treeTrns), ctx1) <- runBaker path $ parseTreeTransforms state
         ((state, listTrns), ctx2) <- runBaker path $ parseListTransforms state
 
+        ((state, listCons), ctx2) <- runBakerWith ctx2 path $ parseConsumer state
+
         case snd state of
             []    -> return (Result flags path ctx1 treeTrns
-                                               ctx2 listTrns)
+                                               ctx2 listTrns
+                                               listCons)
 
             arg:_ -> liftIO $ die ("Unrecognized argument: " ++ arg)
   where
@@ -163,8 +207,14 @@ parseArgs args = do
     runBaker :: Path Abs Dir
              -> BakerT (Except String) a
              -> ExceptT String IO (a, Baker.BakingContext)
-    runBaker path baker = do
-        (e, ctx) <- runBakerT path Baker.defBakingContext $
+    runBaker = runBakerWith Baker.defBakingContext
+
+    runBakerWith :: Baker.BakingContext
+                 -> Path Abs Dir
+                 -> BakerT (Except String) a
+                 -> ExceptT String IO (a, Baker.BakingContext)
+    runBakerWith ctx path baker = do
+        (e, ctx) <- runBakerT path ctx $
                         hoist (hoist generalize) baker
         case e of
             Right res ->
@@ -172,7 +222,6 @@ parseArgs args = do
             Left (Err.VarNotFound notFound, bt) -> do
                 liftIO $ reportError ctx notFound bt
                 throwE ""
-
 
 
 

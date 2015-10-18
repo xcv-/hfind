@@ -1,26 +1,62 @@
 hfind
 =====
-
-Filtering and pruning already works!
-
-To run it,
 ```
 stack build
 ./hfind -h  # prints usage
 ```
 
+Motivation:
+-----------
+
+Other than a fun project, this is intended to be a saner version of the
+traditional find command. It actually has a simple expression language instead
+of hacking the command-line arguments into one. This alone makes it more
+flexible because some external processes (test, etc) can be replaced with a
+simple built-in like `isdir` or `exists`. Captured groups in regular
+expressions can be referenced further in the pipeline, `stat` creates an
+object that can be queried and compared and anywhere an string is expected
+it is possible to interpolate any variable (including from the environment,
+which are treated like regular variables).
+
+At some point it might even be able to build a compatibility layer that allows
+`hfind` to masquerade as `find`.
+
+
 Some examples:
 --------------
 
-
-- Finding git repositories (following symlinks, `-L`)
+- Walk over all files under the home directory but do nothing (not even printing).
 ```
-$ ./hfind -L ~ -prune '$hidden' -if '$type == "d" && isdir "$path/.git"'
+$ ./hfind ~ -nop
+```
+
+- Walk over all files under the home directory skipping hidden directories and
+  printing with a custom format
+```
+$ ./hfind ~ -prune '$hidden' -print 'found $name somewhere in $HOME'
+
+found somefile1 somewhere in /home/user
+found somefile2 somewhere in /home/user
+...
 ```
 
 Equivalent find command:
 ```
-$ ./hfind -L ~ -name '.*' -prune -o -type d -exec test -d '{}/.git' \;
+$ find ~ -name '.*' -prune -o -printf "found %f somewhere in $HOME"
+```
+
+- Finding git repositories (following symlinks, `-L`)
+```
+$ ./hfind -L ~ -prune '$hidden' -if '$type == "d" && isdir "$path/.git"'
+
+/home/[...]/[...]/repo1
+/home/[...]/[...]/[...]/repo2
+...
+```
+
+Equivalent find command:
+```
+$ find -L ~ -name '.*' -prune -o -type d -exec test -d '{}/.git' \;
 ```
 
 - Find all files with the `.hs` extension in the `src` directory, following symlinks.
@@ -50,12 +86,16 @@ $ ./hfind -L src -type f -name '*.hs'
 ```
 
 - Find all `.hs` files in src such that there is a directory with the same name
-except the `.hs` extension in the same directory
+except the `.hs` extension in the same directory and print their first line.
 ```
-$ ./hfind src -if '$name =~ m|(.*)\.hs$| && isdir "$parentpath/$1"'
+$ ./hfind src -if '$name =~ m|(.*)\.hs$| && isdir "$parentpath/$1"' \
+    -print '-- $path --'                                            \
+    -exec head -n2 '$path'
 
-/home/[...]/hfind/src/System/Posix/Lang/Types.hs
-/home/[...]/hfind/src/System/Posix/Find.hs
+-- /home/[...]/hfind/src/System/Posix/Find/Lang/Types.hs --
+module System.Posix.Find.Lang.Types
+-- /home/[...]/hfind/src/System/Posix/Find.hs --
+{-# OPTIONS_GHC -fno-warn-unused-imports #-}
 ```
 
 Equivalent find command: *(none)*
@@ -160,7 +200,7 @@ TODO:
 
 - **done** more detailed error messages with context, like GHC (in the second argument of...)
 - **done** review scope semantics
-- actually run commands, and make `print` a built-in special case that's the default
+- **done** actually run commands, and make `print` a built-in special case that's the default
 - size/time literals
 - evaluate performance (specially EvalT)
 - allow running the entire process asynchronously (chunked, customizable)

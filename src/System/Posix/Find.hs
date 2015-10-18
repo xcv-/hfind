@@ -11,8 +11,7 @@ import System.Posix.Find.Walk        as X
 
 import System.Posix.Find.Lang.Eval      as X
 import System.Posix.Find.Lang.Types     as X
-import System.Posix.Find.Lang.Parser    as X
-import System.Posix.Find.Lang.Predicate as X
+import System.Posix.Find.Lang.BakeParse as X
 
 
 -- examples simulating plain unix find

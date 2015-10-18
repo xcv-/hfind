@@ -14,7 +14,7 @@ import qualified Data.Text.IO  as TextIO
 import qualified Data.Text.ICU as ICU
 
 import Control.Monad              (forM_)
-import Control.Monad.Morph        (lift, hoist)
+import Control.Monad.Morph        (hoist)
 import Control.Monad.Trans.Except (ExceptT, runExceptT)
 
 import qualified Control.Exception as Ex
@@ -23,7 +23,7 @@ import System.Environment (getArgs)
 import System.Exit        (exitFailure, die)
 import System.IO          (stderr)
 
-import Pipes (Pipe, (>->))
+import Pipes (Pipe, Consumer, (>->))
 import qualified Pipes         as Pipes
 import qualified Pipes.Prelude as Pipes
 
@@ -46,9 +46,26 @@ import qualified System.Posix.Find.ArgParse as ArgParse
 
 
 
-buildPipeline :: forall m. (m ~ ExceptT (Eval.EvalContext, Err.RuntimeError) IO)
-              => ArgParse.Result
-              -> IO (Pipe (WalkN' m) T.Text m ())
+type M = ExceptT (Eval.EvalContext, Err.RuntimeError) IO
+
+
+hoistTreeEval :: Eval.EvalContext
+              -> Pipe (WalkR Eval) (WalkR Eval) Eval ()
+              -> Pipe (WalkR M)    (WalkR M)    M    ()
+hoistTreeEval ctx pipe =
+        Pipes.map (C.hoistWalk wrapEvalT)
+    >-> hoist (runEvalT ctx) pipe
+    >-> Pipes.map (C.hoistWalk (runEvalT ctx))
+
+
+hoistListEval :: Eval.EvalContext
+              -> Pipe a b Eval ()
+              -> Pipe a b M    ()
+hoistListEval ctx pipe =
+    hoist (runEvalT ctx) pipe
+
+
+buildPipeline :: ArgParse.Result -> IO (Consumer (WalkN' M) M ())
 buildPipeline parseResult = do
     (Right treeCur, treeCtx) <- Baker.runBakerT (ArgParse.rootPath parseResult)
                                                 (ArgParse.treeContext parseResult)
@@ -63,24 +80,8 @@ buildPipeline parseResult = do
          >-> hoistTreeEval treeEvalCtx (treeTransform treeCur)
          >-> C.flatten
          >-> hoistListEval listEvalCtx (listTransform listCur)
-         >-> C.asPaths
-         >-> C.asFiles
-         >-> C.plainText
+         >-> hoistListEval listEvalCtx (listConsumer  listCur)
   where
-    hoistTreeEval :: Eval.EvalContext
-                  -> Pipe (WalkR Eval) (WalkR Eval) Eval ()
-                  -> Pipe (WalkR m)    (WalkR m)    m    ()
-    hoistTreeEval ctx pipe =
-            Pipes.map (C.hoistWalk wrapEvalT)
-        >-> hoist (runEvalT ctx) pipe
-        >-> Pipes.map (C.hoistWalk (runEvalT ctx))
-
-    hoistListEval :: Eval.EvalContext
-                  -> Pipe NodeListEntryR NodeListEntryR Eval ()
-                  -> Pipe NodeListEntryR NodeListEntryR m    ()
-    hoistListEval ctx pipe =
-        hoist (runEvalT ctx) pipe
-
     setCurrentNode :: Baker.VarId -> FSNode t 'Resolved -> Eval ()
     setCurrentNode var n =
         Eval.setVarValue var (toValue (Path.toText (nodePath n)))
@@ -96,6 +97,11 @@ buildPipeline parseResult = do
         Pipes.chain
           (bitraverse_ (setCurrentNode curNode) (setCurrentNode curNode))
         >-> ArgParse.listTransform parseResult
+
+    listConsumer :: Baker.VarId -> Consumer NodeListEntryR Eval ()
+    listConsumer _ =
+        -- already set in listTransform
+        ArgParse.listConsumer parseResult
 
 
 printEvalError :: [(Name, Value)]
@@ -156,11 +162,7 @@ runFind parseResult = do
 
     pipe <- buildPipeline parseResult
 
-    res <- runExceptT $ Pipes.runEffect $
-                   walk
-               >-> pipe
-               >-> Pipes.chain (lift . TextIO.putStrLn)
-               >-> Pipes.drain
+    res <- runExceptT $ Pipes.runEffect $ walk >-> pipe
 
     case res of
         Right () -> return ()

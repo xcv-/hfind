@@ -12,7 +12,7 @@ module SpecHelper
     , module System.Posix.Find.Lang.Builtins
     , module System.Posix.Find.Lang.Eval
     , module System.Posix.Find.Lang.Parser
-    , module System.Posix.Find.Lang.Predicate
+    , module System.Posix.Find.Lang.BakeParse
     , module System.Posix.Find.Lang.Types
     , shouldError
     ) where
@@ -45,8 +45,8 @@ import System.Posix.Find.Combinators
 
 import System.Posix.Find.Lang.Builtins
 import System.Posix.Find.Lang.Eval
-import System.Posix.Find.Lang.Parser
-import System.Posix.Find.Lang.Predicate
+import System.Posix.Find.Lang.Parser    hiding (parseStringInterp)
+import System.Posix.Find.Lang.BakeParse
 import System.Posix.Find.Lang.Types
 
 

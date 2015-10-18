@@ -5,6 +5,8 @@
 module System.Posix.Find.Lang.Parser
     ( parsePred
     , parseExpr
+    , parseStringInterp
+    , parseCmdLineArg
     , ParseError
     ) where
 
@@ -37,6 +39,16 @@ parsePred = runParser (whitespace *> predicate <* eof) ()
 parseExpr :: IsExpr expr => SourceName -> Text -> Either ParseError expr
 parseExpr = runParser (whitespace *> expr <* eof) ()
 
+parseStringInterp :: IsExpr expr => SourceName -> Text -> Either ParseError expr
+parseStringInterp = runParser (whitespace *> parser <* eof) ()
+  where
+    parser = located $ do
+        stringInterp =<< consumeEverything
+
+
+parseCmdLineArg :: IsExpr expr => SourceName -> Text -> Either ParseError expr
+parseCmdLineArg = runParser (whitespace *> cmdLineArg <* eof) ()
+
 
 langDef :: Monad m => Tok.GenLanguageDef Text () m
 langDef = Tok.LanguageDef
@@ -64,6 +76,9 @@ identifier = T.pack <$> Tok.identifier lang
 
 parens :: Parser a -> Parser a
 parens = Tok.parens lang
+
+braces :: Parser a -> Parser a
+braces = Tok.braces lang
 
 symbol :: String -> Parser ()
 symbol s = Tok.symbol lang s $> ()
@@ -112,6 +127,12 @@ predicateValue = parens predicate
               , return (exprP e1)
               ]
 
+
+cmdLineArg :: IsExpr expr => Parser expr
+cmdLineArg = located $ do
+    stringInterp =<< consumeEverything
+
+
 predicate :: forall pre. IsPred pre => Parser pre
 predicate = do
     i1  <- getInput
@@ -148,9 +169,9 @@ comparator = try (symbol "==" $> OpEQ)
 expr :: forall expr. IsExpr expr => Parser expr
 expr = parens expr
    <|> choice
-         [ located $ varE        <$> var
-         , located $ simplInterp <$> interp
-         , located $ litE        <$> litNoString
+         [ located $ varE         <$> var
+         , located $ stringInterp =<< stringLiteral
+         , located $ litE         <$> litNoString
          , located $ app
          ]
    <?> "expression"
@@ -158,6 +179,13 @@ expr = parens expr
     app :: Parser (SrcLoc -> expr)
     app = appE <$> identifier <*> expr <?> "function application"
 
+
+stringInterp :: forall expr. IsExpr expr => Text -> Parser (SrcLoc -> expr)
+stringInterp input = do
+    e <- either throwParseError return (parseInterp input)
+
+    return (simplInterp e)
+  where
     simplInterp :: [Interp (ExprVar expr)] -> SrcLoc -> expr
     simplInterp pieces =
         case contract pieces of
@@ -172,10 +200,6 @@ expr = parens expr
         case (p, contract ps) of
           (InterpLit s1, InterpLit s2 : ps') -> InterpLit (s1 <> s2) : ps'
           (_, ps')                           -> p:ps'
-
-    interp :: Parser [Interp (ExprVar expr)]
-    interp = flip label "interpolated string" $
-        either throwParseError return . parseInterp =<< stringLiteral
 
     parseInterp :: Text -> Either (SourcePos -> ParseError) [Interp (ExprVar expr)]
     parseInterp s =
@@ -292,6 +316,12 @@ located p = do
     let src = T.take (T.length prev - T.length cur) prev
     return (f (src, loc))
 
+
+consumeEverything :: Parser Text
+consumeEverything = do
+    input <- getInput
+    setInput ""
+    return input
 
 parseWithLeftovers :: Parser a
                    -> SourceName
