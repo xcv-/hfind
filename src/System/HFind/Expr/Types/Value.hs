@@ -3,16 +3,16 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE LambdaCase #-}
-module System.Posix.Find.Lang.Types.Value where
+module System.HFind.Expr.Types.Value where
 
 import Data.Int  (Int64)
 
 import Data.Text (Text)
 import qualified Data.Text as T
 
-import qualified System.Posix.Text.Path as Path
+import qualified System.HFind.Path as Path
 
-import System.Posix.Find.Types (FSAnyNodeR, FSAnyNode(..), nodePath)
+import System.HFind.Types (FSAnyNodeR, FSAnyNode(..), nodePath)
 
 
 data Value = BoolV   !Bool

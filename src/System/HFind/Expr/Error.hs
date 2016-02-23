@@ -1,5 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
-module System.Posix.Find.Lang.Error where
+module System.HFind.Expr.Error where
 
 import Control.Exception (SomeException)
 
@@ -13,10 +13,10 @@ import Text.Parsec.Pos (SourcePos)
 import Text.PrettyPrint.Leijen.Text (Doc)
 import qualified Text.PrettyPrint.Leijen.Text as PP
 
-import System.Posix.Text.Path (RawPath)
+import System.HFind.Path (RawPath)
 
-import System.Posix.Find.Lang.Types.AST (Var, Src)
-import System.Posix.Find.Lang.Types.Value
+import System.HFind.Expr.Types.AST (Src, Var)
+import System.HFind.Expr.Types.Value
 
 
 data VarNotFoundError = VarNotFound !Var

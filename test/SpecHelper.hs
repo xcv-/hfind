@@ -6,14 +6,14 @@
 module SpecHelper
     ( module Test.Hspec
     , module Test.Hspec.QuickCheck
-    , module System.Posix.Text.Path
-    , module System.Posix.Find.Types
-    , module System.Posix.Find.Combinators
-    , module System.Posix.Find.Lang.Builtins
-    , module System.Posix.Find.Lang.Eval
-    , module System.Posix.Find.Lang.Parser
-    , module System.Posix.Find.Lang.BakeParse
-    , module System.Posix.Find.Lang.Types
+    , module System.HFind.Path
+    , module System.HFind.Types
+    , module System.HFind.Combinators
+    , module System.HFind.Expr.Bakers
+    , module System.HFind.Expr.Builtins
+    , module System.HFind.Expr.Eval
+    , module System.HFind.Expr.Parser
+    , module System.HFind.Expr.Types
     , shouldError
     ) where
 
@@ -39,15 +39,15 @@ import qualified Pipes.Prelude as P
 import System.IO (stderr, hPutStrLn)
 import System.IO.Unsafe
 
-import System.Posix.Text.Path
-import System.Posix.Find.Types
-import System.Posix.Find.Combinators
+import System.HFind.Path
+import System.HFind.Types
+import System.HFind.Combinators
 
-import System.Posix.Find.Lang.Builtins
-import System.Posix.Find.Lang.Eval
-import System.Posix.Find.Lang.Parser    hiding (parseStringInterp)
-import System.Posix.Find.Lang.BakeParse
-import System.Posix.Find.Lang.Types
+import System.HFind.Expr.Bakers
+import System.HFind.Expr.Builtins
+import System.HFind.Expr.Eval
+import System.HFind.Expr.Parser hiding (parseStringInterp)
+import System.HFind.Expr.Types
 
 
 shouldError :: NFData a => a -> () -> Expectation

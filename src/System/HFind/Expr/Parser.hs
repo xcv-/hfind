@@ -2,7 +2,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
-module System.Posix.Find.Lang.Parser
+module System.HFind.Expr.Parser
     ( parsePred
     , parseExpr
     , parseStringInterp
@@ -30,7 +30,7 @@ import qualified Text.Parsec.Error as PE
 import qualified Text.Parsec.Prim  as Prim
 import qualified Text.Parsec.Token as Tok
 
-import System.Posix.Find.Lang.Types
+import System.HFind.Expr.Types
 
 
 parsePred :: IsPred pre => SourceName -> Text -> Either ParseError pre
@@ -155,7 +155,7 @@ predicate = do
 
         let src = T.take (T.length i1 - T.length ik) i1
 
-        return (\lhs -> op lhs rhs (src, loc))
+        return (\lhs -> op lhs rhs (SrcLoc src loc))
 
 
 comparator :: Parser Op
@@ -314,7 +314,7 @@ located p = do
     cur  <- getInput
 
     let src = T.take (T.length prev - T.length cur) prev
-    return (f (src, loc))
+    return (f (SrcLoc src loc))
 
 
 consumeEverything :: Parser Text

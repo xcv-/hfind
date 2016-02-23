@@ -5,7 +5,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE DataKinds #-}
-module System.Posix.Find.Combinators where
+module System.HFind.Combinators where
 
 import Prelude hiding (filter)
 
@@ -16,8 +16,8 @@ import qualified Data.Text as T
 import Pipes
 import qualified Pipes.Prelude as P
 
-import System.Posix.Text.Path
-import System.Posix.Find.Types
+import System.HFind.Path
+import System.HFind.Types
 
 import System.IO (hPutStrLn, stderr)
 

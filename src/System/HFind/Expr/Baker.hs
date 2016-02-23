@@ -5,7 +5,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE RankNTypes #-}
-module System.Posix.Find.Lang.Baker
+module System.HFind.Expr.Baker
     ( VarId, varIdNum
     , Baker
     , BakerT
@@ -50,13 +50,13 @@ import qualified Data.Text.ICU as ICU
 
 import qualified System.Posix.Env.ByteString as Posix
 
-import System.Posix.Text.Path (Path, Abs, Dir)
+import System.HFind.Path (Path, Abs, Dir)
 
-import System.Posix.Find.Lang.Types (Name, SrcLoc,
-                                     Value(..), RxCaptureMode(..))
+import System.HFind.Expr.Types (Name, SrcLoc(..),
+                                Value(..), RxCaptureMode(..))
 
-import qualified System.Posix.Find.Lang.Error    as Err
-import qualified System.Posix.Find.Lang.Builtins as Builtins
+import qualified System.HFind.Expr.Error    as Err
+import qualified System.HFind.Expr.Builtins as Builtins
 
 
 -- trick to avoid cyclic package dependencies
@@ -224,7 +224,7 @@ lookupBuiltinFunc name = BakerT $ do
 
 
 frame :: Monad m => Text -> SrcLoc -> BakerT m a -> BakerT m a
-frame name (src, loc) (BakerT ma) = BakerT $ do
+frame name (SrcLoc src loc) (BakerT ma) = BakerT $ do
     modify $ \ctx -> ctx {
         ctxBacktrace = Err.pushFrame (Err.BtFrame name src loc)
                                      (ctxBacktrace ctx)
@@ -240,5 +240,4 @@ frame name (src, loc) (BakerT ma) = BakerT $ do
 
 getBacktrace :: Monad m => BakerT m Err.Backtrace
 getBacktrace = BakerT $ gets ctxBacktrace
-
 

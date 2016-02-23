@@ -6,7 +6,7 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE DataKinds #-}
-module System.Posix.Find.Types where
+module System.HFind.Types where
 
 import Data.Bifunctor
 import Data.Bifoldable
@@ -24,10 +24,10 @@ import qualified Pipes.Prelude as P
 import System.Posix.Files (FileStatus)
 import qualified System.Posix.Files as Posix
 
-import System.Posix.Text.Path (Path, Abs, File, Dir, RawPath,
-                               PathType(..), IsPathType,
-                               Link(..))
-import qualified System.Posix.Text.Path as Path
+import System.HFind.Path (Path, Abs, File, Dir, RawPath,
+                          PathType(..), IsPathType,
+                          Link(..))
+import qualified System.HFind.Path as Path
 
 
 -- too useful to put anywhere else

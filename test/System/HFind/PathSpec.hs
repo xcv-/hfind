@@ -1,6 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
-module System.Posix.Text.PathSpec where
+module System.HFind.PathSpec where
 
 import Data.Either
 

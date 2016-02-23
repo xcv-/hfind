@@ -8,7 +8,7 @@
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE RoleAnnotations #-}
 {-# LANGUAGE DataKinds #-}
-module System.Posix.Text.Path where
+module System.HFind.Path where
 
 import Data.Function
 import Data.Monoid

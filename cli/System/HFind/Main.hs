@@ -4,7 +4,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeFamilies #-}
-module System.Posix.Find.Main (main) where
+module System.HFind.Main (main) where
 
 import Data.Monoid ((<>))
 import Data.Bifoldable
@@ -27,22 +27,22 @@ import Pipes (Pipe, Consumer, (>->))
 import qualified Pipes         as Pipes
 import qualified Pipes.Prelude as Pipes
 
-import qualified System.Posix.Text.Path as Path
+import qualified System.HFind.Path as Path
 
-import System.Posix.Find.Types
+import System.HFind.Types
 
-import qualified System.Posix.Find.Walk        as Walk
-import qualified System.Posix.Find.Combinators as C
+import qualified System.HFind.Walk        as Walk
+import qualified System.HFind.Combinators as C
 
-import System.Posix.Find.Lang.Types.AST   (Name)
-import System.Posix.Find.Lang.Types.Value (Value(..), toValue, coerceToString)
+import System.HFind.Expr.Types.AST   (Name)
+import System.HFind.Expr.Types.Value (Value(..), toValue, coerceToString)
 
-import System.Posix.Find.Lang.Eval (Eval, runEvalT, wrapEvalT)
-import qualified System.Posix.Find.Lang.Baker as Baker
-import qualified System.Posix.Find.Lang.Eval  as Eval
-import qualified System.Posix.Find.Lang.Error as Err
+import System.HFind.Expr.Eval (Eval, runEvalT, wrapEvalT)
+import qualified System.HFind.Expr.Baker as Baker
+import qualified System.HFind.Expr.Eval  as Eval
+import qualified System.HFind.Expr.Error as Err
 
-import qualified System.Posix.Find.ArgParse as ArgParse
+import qualified System.HFind.ArgParse as ArgParse
 
 
 

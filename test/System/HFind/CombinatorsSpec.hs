@@ -2,7 +2,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
-module System.Posix.Find.CombinatorsSpec where
+module System.HFind.CombinatorsSpec where
 
 import GHC.Exts
 

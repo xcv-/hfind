@@ -6,7 +6,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeFamilies #-}
-module System.Posix.Find.ArgParse where
+module System.HFind.ArgParse where
 
 import Control.Monad              (when, forM, forM_, (<=<))
 import Control.Monad.Trans.Except (ExceptT(..), Except, throwE)
@@ -28,24 +28,24 @@ import qualified Pipes.Prelude as Pipes
 
 import Text.RawString.QQ (r)
 
-import System.Posix.Text.Path (Path, Abs, Dir, RawPath)
-import qualified System.Posix.Text.Path as Path
+import System.HFind.Path (Path, Abs, Dir, RawPath)
+import qualified System.HFind.Path as Path
 
-import qualified System.Posix.Find.Combinators as C
+import qualified System.HFind.Combinators as C
 
-import System.Posix.Find.Lang.Types.AST (Var(..))
+import System.HFind.Expr.Types.AST (Var(..))
 
-import System.Posix.Find.Lang.Baker (BakerT, runBakerT)
-import System.Posix.Find.Lang.Eval  (Eval)
+import System.HFind.Expr.Baker (BakerT, runBakerT)
+import System.HFind.Expr.Eval  (Eval)
 
-import qualified System.Posix.Find.Lang.Baker as Baker
+import qualified System.HFind.Expr.Baker as Baker
 
-import System.Posix.Find.Lang.BakeParse (parseFilterPredicate,
-                                         parsePrunePredicate,
-                                         parseStringInterp,
-                                         parseCmdLine)
+import System.HFind.Expr.Bakers (parseFilterPredicate,
+                                 parsePrunePredicate,
+                                 parseStringInterp,
+                                 parseCmdLine)
 
-import qualified System.Posix.Find.Lang.Error as Err
+import qualified System.HFind.Expr.Error as Err
 
 
 data FindFlag = FollowLinks | DryRun

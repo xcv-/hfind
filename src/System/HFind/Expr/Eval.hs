@@ -5,7 +5,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE RankNTypes #-}
-module System.Posix.Find.Lang.Eval
+module System.HFind.Expr.Eval
     ( Eval
     , EvalContext
     , ctxGetValues, ctxGetActiveMatch, ctxGetBacktrace, ctxGetBakerContext
@@ -39,12 +39,11 @@ import Data.Vector.Mutable (IOVector)
 import qualified Data.Vector         as V
 import qualified Data.Vector.Mutable as V
 
-import System.Posix.Find.Lang.Types (Value(..), RxCaptureMode(..))
+import System.HFind.Expr.Types (Value(..), RxCaptureMode(..))
 
-import System.Posix.Find.Lang.Baker (VarId)
-import qualified System.Posix.Find.Lang.Baker as Baker
-import qualified System.Posix.Find.Lang.Error as Err
-
+import System.HFind.Expr.Baker (VarId)
+import qualified System.HFind.Expr.Baker as Baker
+import qualified System.HFind.Expr.Error as Err
 
 
 data EvalContext = EvalContext
@@ -148,8 +147,7 @@ getVarValue :: (MonadIO m, MonadCatch m) => VarId -> EvalT m Value
 getVarValue i = do
     vals <- EvalT $ asks ctxValues
 
-    do (!val) <- liftIO (V.read vals (Baker.varIdNum i))
-       return val
+    liftIO (V.read vals (Baker.varIdNum i))
     `catchAll` (throwError . Err.NativeError)
 
 

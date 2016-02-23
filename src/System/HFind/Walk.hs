@@ -3,7 +3,7 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
-module System.Posix.Find.Walk
+module System.HFind.Walk
     ( SymlinkStrategy
     , followSymlinks
     , symlinksAreFiles
@@ -31,8 +31,8 @@ import System.Directory
 import qualified System.Posix.Types            as Posix
 import qualified System.Posix.Files.ByteString as Posix
 
-import System.Posix.Find.Types
-import System.Posix.Text.Path
+import System.HFind.Types
+import System.HFind.Path
 
 
 newtype SymlinkStrategy s = SymlinkStrategy

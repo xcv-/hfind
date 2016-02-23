@@ -7,7 +7,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE BangPatterns #-}
-module System.Posix.Find.Lang.Interp
+module System.HFind.Expr.Bakers.Fused
   ( LitBaker,  runLitBaker
   , VarBaker,  runVarBaker
   , ExprBaker, runExprBaker
@@ -23,16 +23,16 @@ import qualified Data.Text.Encoding as T
 
 import qualified Data.Text.ICU as ICU
 
-import System.Posix.Find.Types (FSAnyNodeR)
+import System.HFind.Types (FSAnyNodeR)
 
-import System.Posix.Find.Lang.Types
-import System.Posix.Find.Lang.Baker (Baker)
-import System.Posix.Find.Lang.Eval  (Eval)
-import System.Posix.Find.Lang.Error (VarNotFoundError(..),
-                                     RuntimeError(..), expectedButFound)
+import System.HFind.Expr.Types
+import System.HFind.Expr.Baker (Baker)
+import System.HFind.Expr.Eval  (Eval)
+import System.HFind.Expr.Error (VarNotFoundError(..),
+                                RuntimeError(..), expectedButFound)
 
-import qualified System.Posix.Find.Lang.Baker as Baker
-import qualified System.Posix.Find.Lang.Eval  as Eval
+import qualified System.HFind.Expr.Baker as Baker
+import qualified System.HFind.Expr.Eval  as Eval
 
 
 type EvalValue = FSAnyNodeR -> Eval Value
@@ -79,11 +79,13 @@ instance IsExpr ExprBaker where
     type ExprLit ExprBaker = LitBaker
     type ExprVar ExprBaker = VarBaker
 
-    litE (LitBaker mv) _ = ExprBaker $ do
-        (!v) <- mv
-        return (\_ -> return v)
+    litE (LitBaker mv) _ =
+        ExprBaker $ do
+            (!v) <- mv
+            return (\_ -> return v)
 
-    varE (VarBaker mv) _ = ExprBaker mv
+    varE (VarBaker mv) _ =
+        ExprBaker mv
 
     appE fname (ExprBaker me) src =
         ExprBaker $ Baker.frame "a function application" src $ do
@@ -95,16 +97,16 @@ instance IsExpr ExprBaker where
                 Just f  -> return (Eval.evalWithin bt . f <=< e)
                 Nothing -> throwError (VarNotFound (NamedVar fname))
 
+    interpE pieces src =
+        ExprBaker $ Baker.frame "a string interpolation" src $ do
+            values <- forM pieces $ \case
+                          InterpVar (VarBaker mv) -> InterpVar <$> mv
+                          InterpLit text          -> return (InterpLit text)
 
-    interpE pieces src = ExprBaker $ Baker.frame "a string interpolation" src $ do
-        values <- forM pieces $ \case
-                      InterpVar (VarBaker mv) -> InterpVar <$> mv
-                      InterpLit text          -> return (InterpLit text)
+            return $ \n -> do
+                strs <- mapM (toString n) values
 
-        return $ \n -> do
-            strs <- mapM (toString n) values
-
-            return (StringV (mconcat strs))
+                return (StringV (mconcat strs))
       where
         toString _ (InterpLit s) = return s
         toString n (InterpVar e) = coerceToString <$> e n

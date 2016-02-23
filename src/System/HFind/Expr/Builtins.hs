@@ -5,7 +5,7 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DataKinds #-}
-module System.Posix.Find.Lang.Builtins
+module System.HFind.Expr.Builtins
     ( Builtins
     , BuiltinVar
     , BuiltinFunc
@@ -29,16 +29,16 @@ import qualified Data.HashMap.Strict as H
 
 import qualified System.Posix as Posix
 
-import System.Posix.Text.Path (Path, Abs, File, RawPath)
-import qualified System.Posix.Text.Path as Path
+import System.HFind.Path (Path, Abs, File, RawPath)
+import qualified System.HFind.Path as Path
 
-import System.Posix.Find.Types (FSNode(..), FSAnyNode(..), FSAnyNodeR,
-                                nodePath, nodeStat)
+import System.HFind.Types (FSNode(..), FSAnyNode(..), FSAnyNodeR,
+                           nodePath, nodeStat)
 
-import qualified System.Posix.Find.Walk as Walk
+import qualified System.HFind.Walk as Walk
 
-import System.Posix.Find.Lang.Types
-import System.Posix.Find.Lang.Error (RuntimeError(..), expectedButFound)
+import System.HFind.Expr.Types
+import System.HFind.Expr.Error (RuntimeError(..), expectedButFound)
 
 
 -- m is usually EvalT IO

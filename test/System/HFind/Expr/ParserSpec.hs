@@ -1,12 +1,15 @@
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# LANGUAGE OverloadedStrings #-}
-module System.Posix.Find.Lang.ParserSpec where
+{-# LANGUAGE TypeSynonymInstances #-}
+module System.HFind.Expr.ParserSpec where
 
-import GHC.Exts (IsString(..))
 
 import Data.Either
 import Data.Monoid
+import Data.String (IsString(..))
+import Data.Text   (Text)
 
 import qualified Data.Text.ICU as ICU
 
@@ -17,14 +20,14 @@ import SpecHelper
 instance IsString (Interp a) where
     fromString = InterpLit . fromString
 
-instance IsString Expr where
-    fromString = LitE . StringL . fromString
+instance IsString Lit where
+    fromString = StringL . fromString
 
-instance Eq Lit where
-    BoolL a    == BoolL b      = a == b
-    NumL a     == NumL b       = a == b
-    StringL a  == StringL b    = a == b
-    _          == _            = False
+instance IsString Expr where
+    fromString = LitE . fromString
+
+instance IsString a => IsString (NoLoc a) where
+    fromString = NoLoc . fromString
 
 instance Eq Expr where
     LitE a    == LitE b    = a == b
@@ -45,23 +48,25 @@ instance Eq Pred where
     _         == _          = False
 
 spec = do
-    let parseE = parseExpr "<literal>"
-        parseP = parsePred "<literal>"
+    let parseE = parseExpr "<literal>" :: Text -> Either ParseError (NoLoc Expr)
+        parseP = parsePred "<literal>" :: Text -> Either ParseError (NoLoc Pred)
 
-    let true   = LitE (BoolL True)
-        false  = LitE (BoolL False)
-        num i  = LitE (NumL  i)
-        str s  = LitE (StringL s)
-        var n  = VarE (NamedVar n)
-        rxc i  = VarE (RxCapVar i)
+    let true    = NoLoc $ LitE (NoLoc $ BoolL True)
+        false   = NoLoc $ LitE (NoLoc $ BoolL False)
+        num i   = NoLoc $ LitE (NoLoc $ NumL  i)
+        str s   = NoLoc $ LitE (NoLoc $ StringL s)
+        var n   = NoLoc $ VarE (NoLoc $ NamedVar n)
+        rxc i   = NoLoc $ VarE (NoLoc $ RxCapVar i)
+        intrp i = NoLoc $ InterpE i
+        app h x = NoLoc $ AppE h x
 
-    let trueP  = ExprP true
-        falseP = ExprP false
+    let trueP  = NoLoc $ ExprP true
+        falseP = NoLoc $ ExprP false
 
-    let ivar n = InterpVar (NamedVar n)
-        irxc i = InterpVar (RxCapVar i)
+    let ivar n = InterpVar (NoLoc $ NamedVar n)
+        irxc i = InterpVar (NoLoc $ RxCapVar i)
 
-    describe "System.Posix.Find.Lang.Parser" $ do
+    describe "System.HFind.Expr.Parser" $ do
         context "exprParser" $ do
             it "parses variables" $ do
                 parseE [r|$var123|] `shouldBe`
@@ -89,23 +94,23 @@ spec = do
 
             it "parses interpolations" $ do
                 parseE [r|"$2"|] `shouldBe`
-                    Right (InterpE [irxc 2])
+                    Right (intrp [irxc 2])
 
                 parseE [r|"$var"|] `shouldBe`
-                    Right (InterpE [ivar "var"])
+                    Right (intrp [ivar "var"])
 
                 parseE [r|"test$1in\"terp"|] `shouldBe`
-                    Right (InterpE ["test", irxc 1, "in\"terp"])
+                    Right (intrp ["test", irxc 1, "in\"terp"])
 
                 parseE [r|"test${q}interp"|] `shouldBe`
-                    Right (InterpE ["test", ivar "q", "interp"])
+                    Right (intrp ["test", ivar "q", "interp"])
 
                 parseE [r|"${var}test$$$3"|] `shouldBe`
-                    Right (InterpE [ivar "var", "test$", irxc 3])
+                    Right (intrp [ivar "var", "test$", irxc 3])
 
             it "parses function applications" $ do
                 parseE [r|f g $v|] `shouldBe`
-                    Right (AppE "f" (AppE "g" (var "v")))
+                    Right (app "f" (app "g" (var "v")))
 
                 parseE [r|(f g) (g i)|] `shouldSatisfy` isLeft
 
@@ -113,48 +118,48 @@ spec = do
         context "parsePred" $ do
             it "parses parenthesized predicates" $ do
                 parseP [r|( ( (   (false) ) ))|] `shouldBe`
-                    Right (ExprP false)
+                    Right (NoLoc $ ExprP false)
 
             it "parses any expression" $ do
-                parseP [r|true|] `shouldBe` Right (ExprP true)
-                parseP [r|10|]   `shouldBe` Right (ExprP (num 10))
-                parseP [r|$1|]   `shouldBe` Right (ExprP (rxc 1))
+                parseP [r|true|] `shouldBe` Right (NoLoc $ ExprP true)
+                parseP [r|10|]   `shouldBe` Right (NoLoc $ ExprP $ num 10)
+                parseP [r|$1|]   `shouldBe` Right (NoLoc $ ExprP $ rxc 1)
 
                 parseP [r|"asdf$q"|] `shouldBe`
-                    Right (ExprP (InterpE ["asdf", ivar "q"]))
+                    Right (NoLoc $ ExprP $ NoLoc $ InterpE ["asdf", ivar "q"])
 
             it "parses explicit scopes" $ do
                 parseP [r|scope(true)|] `shouldBe`
-                    Right (ScopeP (ExprP true))
+                    Right (NoLoc $ ScopeP $ NoLoc $ ExprP true)
 
             it "parses negations" $ do
                 parseP [r|not(true)|] `shouldBe`
-                    Right (NotP (ExprP true))
+                    Right (NoLoc $ NotP $ NoLoc $ ExprP true)
 
                 parseP [r|not(((not(true))))|] `shouldBe`
-                    Right (NotP (NotP (ExprP true)))
+                    Right (NoLoc $ NotP $ NoLoc $ NotP $ NoLoc $ ExprP true)
 
                 parseP [r|not(57)|] `shouldBe`
-                    Right (NotP (ExprP (num 57)))
+                    Right (NoLoc $ NotP $ NoLoc $ ExprP $ num 57)
 
             it "parses operator application" $ do
                 parseP [r| 1 == 2 |] `shouldBe`
-                    Right (OpP OpEQ (num 1) (num 2))
+                    Right (NoLoc $ OpP OpEQ (num 1) (num 2))
 
                 parseP [r| $1 == $x |] `shouldBe`
-                    Right (OpP OpEQ (rxc 1) (var "x"))
+                    Right (NoLoc $ OpP OpEQ (rxc 1) (var "x"))
 
                 parseP [r| $size <= 1000 |] `shouldBe`
-                    Right (OpP OpLE (var "size") (num 1000))
+                    Right (NoLoc $ OpP OpLE (var "size") (num 1000))
 
                 parseP [r| $size < 1000 |] `shouldBe`
-                    Right (OpP OpLT (var "size") (num 1000))
+                    Right (NoLoc $ OpP OpLT (var "size") (num 1000))
 
                 parseP [r| $size >= 1000 |] `shouldBe`
-                    Right (OpP OpGE (var "size") (num 1000))
+                    Right (NoLoc $ OpP OpGE (var "size") (num 1000))
 
                 parseP [r| $size > 1000 |] `shouldBe`
-                    Right (OpP OpGT (var "size") (num 1000))
+                    Right (NoLoc $ OpP OpGT (var "size") (num 1000))
 
             it "parses complex regexes with escape sequences" $ do
                 let pat  = [r|^@(?:pat\w+\*?)*/\\[^!*\_\S]$|]
@@ -165,7 +170,7 @@ spec = do
                                    pat'
 
                 parseP ("\"\" =~ m_" <> pat <> "_mxisn") `shouldBe`
-                    Right (MatchP (str "") rx NoCapture)
+                    Right (NoLoc $ MatchP (str "") rx NoCapture)
 
             it "parses unicode regexes" $ do
                 let pat = [r|\w\W\Sł€\S\s$|]
@@ -173,14 +178,18 @@ spec = do
                 let rx = ICU.regex [ICU.CaseInsensitive, ICU.Comments] pat
 
                 parseP (" $name =~ m#" <> pat <> "#ix ") `shouldBe`
-                    Right (MatchP (var "name") rx Capture)
+                    Right (NoLoc $ MatchP (var "name") rx Capture)
 
             it "parses and/or left-associatively" $ do
+                let a p q = NoLoc (AndP p q)
+                    o p q = NoLoc (OrP p q)
+                    no p  = NoLoc (NotP p)
+
                 parseP [r| true && false || true |] `shouldBe`
-                    Right ((trueP `AndP` falseP) `OrP` trueP)
+                    Right ((trueP `a` falseP) `o` trueP)
 
                 parseP [r| true && not(false || true) && true |] `shouldBe`
-                    Right ((trueP `AndP` NotP (falseP `OrP` trueP)) `AndP` trueP)
+                    Right ((trueP `a` no (falseP `o` trueP)) `a` trueP)
 
                 parseP [r| true && (true || true && true) || true |] `shouldBe`
-                    Right ((trueP `AndP` ((trueP `OrP` trueP) `AndP` trueP)) `OrP` trueP)
+                    Right ((trueP `a` ((trueP `o` trueP) `a` trueP)) `o` trueP)

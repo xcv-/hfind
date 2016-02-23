@@ -1,7 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
-module System.Posix.Find.Lang.BakeParse
+module System.HFind.Expr.Bakers
   ( DirPredicate
   , EntryPredicate
   , parsePrunePredicate
@@ -23,22 +23,22 @@ import System.IO (hFlush, stdout)
 
 import Text.Parsec (SourceName)
 
-import System.Posix.Text.Path (Dir)
+import System.HFind.Path (Dir)
 
-import System.Posix.Find.Types (FSNodeType(Resolved), FSNode(..),
-                                FSAnyNode(..),
-                                ListEntry(..),
-                                NodeListEntry, NodeListEntryR)
+import System.HFind.Types (FSNodeType(Resolved), FSNode(..),
+                           FSAnyNode(..),
+                           ListEntry(..),
+                           NodeListEntry, NodeListEntryR)
 
-import System.Posix.Find.Lang.Types.Value (coerceToString)
+import System.HFind.Expr.Types.Value (coerceToString)
 
-import System.Posix.Find.Lang.Baker (Baker, BakerT)
-import System.Posix.Find.Lang.Eval  (Eval)
+import System.HFind.Expr.Baker (Baker, BakerT)
+import System.HFind.Expr.Eval  (Eval)
 
-import qualified System.Posix.Find.Lang.Parser as Parser
-import qualified System.Posix.Find.Lang.Baker  as Baker
+import qualified System.HFind.Expr.Parser as Parser
+import qualified System.HFind.Expr.Baker  as Baker
 
-import System.Posix.Find.Lang.Interp (runPredBaker, runExprBaker)
+import System.HFind.Expr.Bakers.Fused (runPredBaker, runExprBaker)
 
 type NodePredicate  = FSAnyNode     'Resolved -> Eval Bool
 type DirPredicate   = FSNode Dir    'Resolved -> Eval Bool
