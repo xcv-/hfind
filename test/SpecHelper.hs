@@ -59,18 +59,23 @@ shouldError a () = (a `deepseq` return a) `shouldThrow` sel
 
 newtype FileName = FileName { getFileName :: T.Text }
 
+dirToFile :: Path Abs Dir -> Path Abs File
+dirToFile = asFilePath
+
+fileToDir :: Path Abs File -> Path Abs Dir
+fileToDir = asDirPath
+
+
 instance Arbitrary FileName where
     arbitrary = do
         n <- arbitrary
-        if T.null n || n == "." || n == ".." || ("/" `T.isInfixOf` n)
+        if T.null n || n == "." || n == ".." || any (=='/') n
           then arbitrary
           else return (FileName n)
 
-
 instance Arbitrary (Path Abs Dir) where
-    arbitrary = do
-        Positive (Small depth) <- arbitrary
-        pieces <- replicateM depth (getFileName <$> arbitrary)
+    arbitrary = sized $ \depth -> do
+        pieces <- map getFileName <$> arbitrary
         return . unsafeAbsDir $ "/" <> T.intercalate "/" pieces <> "/"
       where
 
@@ -79,17 +84,9 @@ instance Arbitrary (Path Abs Dir) where
             Just par -> par : shrink par
             Nothing  -> []
 
-dirToFile :: Path Abs Dir -> Path Abs File
-dirToFile = asFilePath
-
-fileToDir :: Path Abs File -> Path Abs Dir
-fileToDir = asDirPath
-
-
 instance Arbitrary (Path Abs File) where
     arbitrary = fmap dirToFile arbitrary
     shrink    = map dirToFile . shrink . fileToDir
-
 
 instance (m ~ Identity) => Arbitrary (Walk m FileName FileName) where
     arbitrary = do
@@ -101,14 +98,21 @@ instance (m ~ Identity) => Arbitrary (Walk m FileName FileName) where
             return (FileP fp)
           else do
             dp <- arbitrary
-            --Small numSubdirs <- arbitrary
-            let numSubdirs = 0
-            subdirs <- replicateM numSubdirs arbitrary
-            return (DirP dp (each (subdirs `asTypeOf` [])))
+            subdirs <- arbitrary `asTypeOf` return []
+            return (DirP dp (each subdirs))
 
     shrink (FileP fp)    = []
     shrink (DirP dp mbs) =
-      [DirP dp (each subseq) | subseq <- subsequences (P.toList mbs)]
+      [ DirP dp (each items)
+      | subseq <- subseqs
+      , items <- sequence shrink subseq
+      ]
+      where
+        subseqs =
+            case subsequences (P.toList mbs) of
+                [] -> []
+                xs -> init xs
+
 
 
 instance (m ~ Identity) => Arbitrary (Walk m (Path Abs File) (Path Abs Dir)) where
