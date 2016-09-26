@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -fno-warn-redundant-constraints #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE ConstraintKinds #-}
@@ -100,15 +101,11 @@ nodePath :: (HasErrors s ~ 'False, HasLinks s ~ 'False)
          => FSNode t s -> Path Abs t
 nodePath (FileNode _ p) = p
 nodePath (DirNode _ p)  = p
-nodePath _ =
-    error "System.Posix.Find.Types.nodePath: the impossible just happened!"
 
 nodeStat :: (HasErrors s ~ 'False, HasLinks s ~ 'False)
          => FSNode t s -> FileStatus
 nodeStat (FileNode stat _) = stat
 nodeStat (DirNode  stat _) = stat
-nodeStat _ =
-    error "System.Posix.Find.Types.nodeStat: the impossible just happened!"
 
 
 data FSAnyNode s = forall t. AnyNode (FSNode t s)
