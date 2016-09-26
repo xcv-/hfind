@@ -40,7 +40,8 @@ import System.HFind.Expr.Eval  (Eval)
 
 import qualified System.HFind.Expr.Baker as Baker
 
-import System.HFind.Expr.Bakers (parseFilterPredicate,
+import System.HFind.Expr.Bakers (parseLetBinding,
+                                 parseFilterPredicate,
                                  parsePrunePredicate,
                                  parseStringInterp,
                                  parseCmdLine)
@@ -99,7 +100,6 @@ parseTreeTransforms (i, "-prune":expr:args) = do
 
     (state', trns) <- parseTreeTransforms (i+2, args)
     return (state', C.pruneDirsM predicate >-> trns)
-
 parseTreeTransforms state = return (state, Pipes.cat)
 
 
@@ -113,7 +113,12 @@ parseListTransforms (i, "-if":expr:args) = do
 
     (state', trns) <- parseListTransforms (i+2, args)
     return (state', Pipes.filterM predicate >-> trns)
+parseListTransforms (i, "-let":expr:args) = do
+    let sourceName = "argument #" ++ show (i+1)
+    update <- parseLetBinding sourceName expr
 
+    (state', trns) <- parseListTransforms (i+2, args)
+    return (state', Pipes.chain update >-> trns)
 parseListTransforms state = return (state, Pipes.cat)
 
 

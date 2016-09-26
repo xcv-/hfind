@@ -5,6 +5,7 @@
 module System.HFind.Expr.Parser
     ( parsePred
     , parseExpr
+    , parseLetBinding
     , parseStringInterp
     , parseCmdLineArg
     , ParseError
@@ -38,6 +39,9 @@ parsePred = runParser (whitespace *> predicate <* eof) ()
 
 parseExpr :: IsExpr expr => SourceName -> Text -> Either ParseError expr
 parseExpr = runParser (whitespace *> expr <* eof) ()
+
+parseLetBinding :: IsExpr expr => SourceName -> Text -> Either ParseError (Name, expr)
+parseLetBinding = runParser (whitespace *> letBinding <* eof) ()
 
 parseStringInterp :: IsExpr expr => SourceName -> Text -> Either ParseError expr
 parseStringInterp = runParser (whitespace *> parser <* eof) ()
@@ -165,6 +169,13 @@ comparator = try (symbol "==" $> OpEQ)
          <|> try (symbol "<"  $> OpLT)
          <|> try (symbol ">"  $> OpGT)
          <?> "comparison operator"
+
+letBinding :: forall expr. IsExpr expr => Parser (Name, expr)
+letBinding = do
+    ident <- identifier
+    symbol "="
+    e <- expr
+    return (ident, e)
 
 expr :: forall expr. IsExpr expr => Parser expr
 expr = parens expr

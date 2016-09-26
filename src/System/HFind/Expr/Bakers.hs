@@ -6,11 +6,12 @@ module System.HFind.Expr.Bakers
   , EntryPredicate
   , parsePrunePredicate
   , parseFilterPredicate
+  , parseLetBinding
   , parseStringInterp
   , parseCmdLine
   ) where
 
-import Control.Monad              (forM)
+import Control.Monad              (forM, (<=<))
 import Control.Monad.Trans        (lift)
 import Control.Monad.Trans.Except (Except, throwE)
 import Control.Monad.Morph        (hoist, generalize)
@@ -32,18 +33,26 @@ import System.HFind.Types (FSNodeType(Resolved), FSNode(..),
 
 import System.HFind.Expr.Types.Value (coerceToString)
 
-import System.HFind.Expr.Baker (Baker, BakerT)
-import System.HFind.Expr.Eval  (Eval)
+import System.HFind.Expr.Baker     (Baker, BakerT)
+import System.HFind.Expr.Eval      (Eval)
+import System.HFind.Expr.Types.AST (Name)
 
 import qualified System.HFind.Expr.Parser as Parser
 import qualified System.HFind.Expr.Baker  as Baker
+import qualified System.HFind.Expr.Eval   as Eval
 
-import System.HFind.Expr.Bakers.Fused (runPredBaker, runExprBaker)
+import System.HFind.Expr.Bakers.Fused (ExprBaker, runExprBaker,
+                                       runPredBaker)
 
-type NodePredicate  = FSAnyNode     'Resolved -> Eval Bool
-type DirPredicate   = FSNode Dir    'Resolved -> Eval Bool
-type EntryPredicate = NodeListEntry 'Resolved -> Eval Bool
-type EntryCommand   = NodeListEntry 'Resolved -> Eval (IO ())
+type NodeAction a   = FSAnyNode     'Resolved -> Eval a
+type DirAction a    = FSNode Dir    'Resolved -> Eval a
+type EntryAction a  = NodeListEntry 'Resolved -> Eval a
+
+type NodePredicate  = NodeAction  Bool
+type DirPredicate   = DirAction   Bool
+type EntryPredicate = EntryAction Bool
+type EntryCommand   = EntryAction (IO ())
+
 
 type M = BakerT (Except String)
 
@@ -77,6 +86,18 @@ parseFilterPredicate name s = do
     p <- parseNodePredicate name s
 
     return (p . entryToNode)
+
+parseLetBinding :: SourceName -> String -> M (EntryAction ())
+parseLetBinding name s = do
+    p <- parseWith runLetBinding Parser.parseLetBinding name s
+
+    return (p . entryToNode)
+  where
+    runLetBinding :: (Name, ExprBaker) -> Baker (NodeAction ())
+    runLetBinding (ident, exprBaker) = do
+        varId <- Baker.newVar ident
+        expr  <- runExprBaker exprBaker
+        return (Eval.setVarValue varId <=< expr)
 
 parseStringInterp :: SourceName -> String -> M (NodeListEntryR -> Eval T.Text)
 parseStringInterp name s =
