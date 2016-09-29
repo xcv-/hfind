@@ -60,6 +60,10 @@ class (IsLit (ExprLit expr), IsVar (ExprVar expr)) => IsExpr expr where
     varE    :: ExprVar expr -> SrcLoc -> expr
     appE    :: Name -> expr -> SrcLoc -> expr
 
+    plusE   :: expr -> expr -> SrcLoc -> expr
+    multE   :: expr -> expr -> SrcLoc -> expr
+    negE    :: expr -> SrcLoc -> expr
+
     interpE :: [Interp (ExprVar expr)] -> SrcLoc -> expr
 
 class IsExpr (PredExpr pre) => IsPred pre where
@@ -91,6 +95,9 @@ data Expr_ f
     = LitE    !(f Lit)
     | VarE    !(f Var)
     | AppE    !Name !(f (Expr_ f))
+    | PlusE   !(f (Expr_ f)) !(f (Expr_ f))
+    | MultE   !(f (Expr_ f)) !(f (Expr_ f))
+    | NegE    !(f (Expr_ f))
     | InterpE ![Interp (f Var)]
 
 data Pred_ f
@@ -153,6 +160,9 @@ instance WithSrcLoc f => IsExpr (f (Expr_ f)) where
     litE    = withLoc . LitE
     varE    = withLoc . VarE
     appE h  = withLoc . AppE h
+    plusE x = withLoc . PlusE x
+    multE x = withLoc . MultE x
+    negE    = withLoc . NegE
     interpE = withLoc . InterpE
 
 instance WithSrcLoc f => IsPred (f (Pred_ f)) where

@@ -28,6 +28,7 @@ import Text.Parsec
 import Text.Parsec.Pos
 import Text.Parsec.Text (Parser)
 import qualified Text.Parsec.Error as PE
+import qualified Text.Parsec.Expr  as PExpr
 import qualified Text.Parsec.Prim  as Prim
 import qualified Text.Parsec.Token as Tok
 
@@ -49,7 +50,6 @@ parseStringInterp = runParser (whitespace *> parser <* eof) ()
     parser = located $ do
         stringInterp =<< consumeEverything
 
-
 parseCmdLineArg :: IsExpr expr => SourceName -> Text -> Either ParseError expr
 parseCmdLineArg = runParser (whitespace *> cmdLineArg <* eof) ()
 
@@ -64,8 +64,9 @@ langDef = Tok.LanguageDef
   , Tok.identLetter = alphaNum <|> char '_'
   , Tok.opStart = Tok.opStart langDef
   , Tok.opLetter = oneOf ":!#$%&*+./<=>?@\\^|-~"
-  , Tok.reservedOpNames = ["==", "=~", "<=", ">=", "<", ">", "&&", "||"]
-  , Tok.reservedNames = ["true", "false", "not", "scope"]
+  , Tok.reservedOpNames = ["+", "-", "*", "/",
+                           "==", "=~", "<=", ">=", "<", ">"]
+  , Tok.reservedNames = ["true", "false", "and", "or", "not", "scope"]
   , Tok.caseSensitive = True
   }
 
@@ -100,6 +101,35 @@ stringLiteral :: Parser Text
 stringLiteral = T.pack <$> Tok.stringLiteral lang
 
 
+cmdLineArg :: IsExpr expr => Parser expr
+cmdLineArg = located $ do
+    stringInterp =<< consumeEverything
+
+
+predicate :: forall pre. IsPred pre => Parser pre
+predicate = do
+    i1  <- getInput
+    loc <- getPosition
+
+    p1  <- predicateValue
+
+    rest <- many (item i1 loc)
+
+    -- [op_rhs2, op_rhs3, ...] -> ... op_rhs3 (op_rhs2 p1)
+    return $ foldl' (\lhs op_rhs -> op_rhs lhs) p1 rest
+  where
+    item :: Src -> SourcePos -> Parser (pre -> pre)
+    item i1 loc = try $ do
+        op <- reserved "and" $> andP
+          <|> reserved "or"  $> orP
+
+        rhs <- predicateValue
+        ik  <- getInput
+
+        let src = T.take (T.length i1 - T.length ik) i1
+
+        return (\lhs -> op lhs rhs (SrcLoc src loc))
+
 predicateValue :: forall pre. IsPred pre => Parser pre
 predicateValue = parens predicate
              <|> (scope    <?> "explicit scope")
@@ -125,60 +155,61 @@ predicateValue = parens predicate
                 return (opP op e1 e2)
 
             Nothing -> choice
-              [ do symbol "=~"
+              [ do reservedOp "=~"
                    (rx, capMode) <- regex
                    return (matchP e1 rx capMode)
               , return (exprP e1)
               ]
 
-
-cmdLineArg :: IsExpr expr => Parser expr
-cmdLineArg = located $ do
-    stringInterp =<< consumeEverything
-
-
-predicate :: forall pre. IsPred pre => Parser pre
-predicate = do
-    i1  <- getInput
-    loc <- getPosition
-
-    p1  <- predicateValue
-
-    rest <- many (item i1 loc)
-
-    -- [op_rhs2, op_rhs3, ...] -> ... op_rhs3 (op_rhs2 p1)
-    return $ foldl' (\lhs op_rhs -> op_rhs lhs) p1 rest
-  where
-    item :: Src -> SourcePos -> Parser (pre -> pre)
-    item i1 loc = try $ do
-        op <- reservedOp "&&" $> andP
-          <|> reservedOp "||" $> orP
-
-        rhs <- predicateValue
-        ik  <- getInput
-
-        let src = T.take (T.length i1 - T.length ik) i1
-
-        return (\lhs -> op lhs rhs (SrcLoc src loc))
-
-
 comparator :: Parser Op
-comparator = try (symbol "==" $> OpEQ)
-         <|> try (symbol "<=" $> OpLE)
-         <|> try (symbol ">=" $> OpGE)
-         <|> try (symbol "<"  $> OpLT)
-         <|> try (symbol ">"  $> OpGT)
+comparator = try (reservedOp "==" $> OpEQ)
+         <|> try (reservedOp "<=" $> OpLE)
+         <|> try (reservedOp ">=" $> OpGE)
+         <|> try (reservedOp "<"  $> OpLT)
+         <|> try (reservedOp ">"  $> OpGT)
          <?> "comparison operator"
 
 letBinding :: forall expr. IsExpr expr => Parser (Name, expr)
 letBinding = do
     ident <- identifier
-    symbol "="
+    reservedOp "="
     e <- expr
     return (ident, e)
 
+
 expr :: forall expr. IsExpr expr => Parser expr
-expr = parens expr
+expr = located arithExpr
+
+-- HACK: Parsec's expression parser limits operator types to
+--   Parser (a -> a -> a),
+-- but we need
+--   Parser (a -> a -> SrcLoc -> a)
+-- or similar, so we use a = (SrcLoc -> expr):
+--   Parser ((SrcLoc -> expr) -> (SrcLoc -> expr) -> SrcLoc -> expr)
+-- Hopefully most of them will not be used (intermediate values),
+-- while the base atoms are actually
+--   fmap const (located ...),
+-- so they do contain the SrcLoc
+arithExpr :: forall expr. IsExpr expr => Parser (SrcLoc -> expr)
+arithExpr = PExpr.buildExpressionParser table (fmap const exprAtom)
+  where
+    table :: PExpr.OperatorTable T.Text () Identity (SrcLoc -> expr)
+    table = [ [ prefix pos, prefix neg ]
+            , [ binary mult ]
+            , [ binary plus, binary minus ] ]
+
+    binary p = PExpr.Infix p PExpr.AssocLeft
+    prefix p = PExpr.Prefix p
+
+    plus  = reservedOp "+" $> \x y l -> plusE (x l) (y l) l
+    minus = reservedOp "-" $> \x y l -> plusE (x l) (negE (y l) l) l
+    mult  = reservedOp "*" $> \x y l -> multE (x l) (y l) l
+    pos   = reservedOp "+" $> \x l   -> x l
+    neg   = reservedOp "-" $> \x l   -> negE (x l) l
+
+exprAtom :: forall expr. IsExpr expr => Parser expr
+exprAtom =
+       parens (located arithExpr)
    <|> choice
          [ located $ varE         <$> var
          , located $ stringInterp =<< stringLiteral

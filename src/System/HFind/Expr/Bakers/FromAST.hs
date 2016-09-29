@@ -18,6 +18,9 @@ mapExpr mu e =
         LitE flit   -> LitE (mu flit)
         VarE fvar   -> VarE (mu fvar)
         AppE h fx   -> AppE h (go fx)
+        PlusE x y   -> PlusE (go x) (go y)
+        MultE x y   -> MultE (go x) (go y)
+        NegE x      -> NegE (go x)
         InterpE fvs -> InterpE (map (fmap mu) fvs)
   where
     go = mu . fmap (mapExpr mu)
@@ -55,6 +58,9 @@ convertExpr (Loc e loc) =
         LitE lit  -> litE (convertLit lit) loc
         VarE var  -> varE (convertVar var) loc
         AppE f x  -> appE f (convertExpr x) loc
+        PlusE x y -> plusE (convertExpr x) (convertExpr y) loc
+        MultE x y -> multE (convertExpr x) (convertExpr y) loc
+        NegE x    -> negE (convertExpr x) loc
         InterpE i -> interpE (map (fmap convertVar) i) loc
 
 convertPred :: IsPred pred => LocPred -> pred

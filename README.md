@@ -63,21 +63,21 @@ $ find -L ~ -name '.*' -prune -o -type d -exec test -d '{}/.git' \;
 ```
 $ ./hfind -L src -if '$type == "f" && $name =~ m|\.hs$|'
 
-/home/[...]/hfind/src/System/Posix/Find/Combinators.hs
-/home/[...]/hfind/src/System/Posix/Find/Lang/Baker.hs
-/home/[...]/hfind/src/System/Posix/Find/Lang/Builtins.hs
-/home/[...]/hfind/src/System/Posix/Find/Lang/Error.hs
-/home/[...]/hfind/src/System/Posix/Find/Lang/Eval.hs
-/home/[...]/hfind/src/System/Posix/Find/Lang/Interp.hs
-/home/[...]/hfind/src/System/Posix/Find/Lang/Parser.hs
-/home/[...]/hfind/src/System/Posix/Find/Lang/Predicate.hs
-/home/[...]/hfind/src/System/Posix/Find/Lang/Types/AST.hs
-/home/[...]/hfind/src/System/Posix/Find/Lang/Types/Value.hs
-/home/[...]/hfind/src/System/Posix/Find/Lang/Types.hs
-/home/[...]/hfind/src/System/Posix/Find/Types.hs
-/home/[...]/hfind/src/System/Posix/Find/Walk.hs
-/home/[...]/hfind/src/System/Posix/Find.hs
-/home/[...]/hfind/src/System/Posix/Text/Path.hs
+/home/[...]/hfind/src/System/HFind/Combinators.hs
+/home/[...]/hfind/src/System/HFind/Expr/Baker.hs
+/home/[...]/hfind/src/System/HFind/Expr/Bakers/FromAST.hs
+/home/[...]/hfind/src/System/HFind/Expr/Bakers/Fused.hs
+/home/[...]/hfind/src/System/HFind/Expr/Bakers.hs
+/home/[...]/hfind/src/System/HFind/Expr/Builtins.hs
+/home/[...]/hfind/src/System/HFind/Expr/Error.hs
+/home/[...]/hfind/src/System/HFind/Expr/Eval.hs
+/home/[...]/hfind/src/System/HFind/Expr/Parser.hs
+/home/[...]/hfind/src/System/HFind/Expr/Types/AST.hs
+/home/[...]/hfind/src/System/HFind/Expr/Types/Value.hs
+/home/[...]/hfind/src/System/HFind/Expr/Types.hs
+/home/[...]/hfind/src/System/HFind/Path.hs
+/home/[...]/hfind/src/System/HFind/Types.hs
+/home/[...]/hfind/src/System/HFind/Walk.hs
 ```
 
 Equivalent find command:
@@ -88,21 +88,25 @@ $ ./hfind -L src -type f -name '*.hs'
 - Find all `.hs` files in src such that there is a directory with the same name
 except the `.hs` extension in the same directory and print their first line.
 ```
-$ ./hfind src -if '$name =~ m|(.*)\.hs$| && isdir "$parentpath/$1"' \
-    -print '-- $path --'                                            \
+$ ./hfind src -if '$name =~ m|(.*)\.hs$|'  \
+    -let 'module_name=$1'                  \
+    -if 'isdir "$parentpath/$module_name"' \
+    -print '-- $path --'                   \
     -exec head -n2 '$path'
 
--- /home/[...]/hfind/src/System/Posix/Find/Lang/Types.hs --
-module System.Posix.Find.Lang.Types
--- /home/[...]/hfind/src/System/Posix/Find.hs --
-{-# OPTIONS_GHC -fno-warn-unused-imports #-}
+-- /home/[...]/hfind/src/System/HFind/Expr/Bakers.hs --
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE LambdaCase #-}
+-- /home/[...]/hfind/src/System/HFind/Expr/Types.hs --
+module System.HFind.Expr.Types
+  ( module X
 ```
 
 Equivalent find command: *(none)*
 
 
-- Find all regular files in `.stack-work/` that don't have a dot in the name,
-  it starts with a lowercase letter. Plus, the owner group must have the same
+- Find all regular files in `.stack-work/` that don't have a dot in the name
+  and start with a lowercase letter. Plus, the owner group must have the same
   execution permission as the rest of the users.
 
 ```
@@ -112,32 +116,31 @@ $ ./hfind .stack-work \
     -if '$name =~ m/^[a-z]/'                   \
     -if '$perms =~ m/... ..(.) ..\1/x'
 
-/home/[...]/hfind/.stack-work/dist/i386-linux/Cabal-1.22.4.0/build/hfind/hfind
-/home/[...]/hfind/.stack-work/dist/i386-linux/Cabal-1.22.4.0/build/spec/spec
-/home/[...]/hfind/.stack-work/dist/i386-linux/Cabal-1.22.4.0/setup-config
-/home/[...]/hfind/.stack-work/dist/i386-linux/Cabal-1.22.4.0/stack-build-cache
-/home/[...]/hfind/.stack-work/dist/i386-linux/Cabal-1.22.4.0/stack-cabal-mod
-/home/[...]/hfind/.stack-work/dist/i386-linux/Cabal-1.22.4.0/stack-config-cache
-/home/[...]/hfind/.stack-work/dist/i386-linux/Cabal-1.22.4.0/stack-test-built
-/home/[...]/hfind/.stack-work/dist/i386-linux/Cabal-1.22.4.0/stack-test-success
-/home/[...]/hfind/.stack-work/install/i386-linux/lts-3.4/7.10.2/bin/hfind
+/home/[...]/hfind/.stack-work/dist/i386-linux/Cabal-1.24.0.0/build/hfind/hfind
+/home/[...]/hfind/.stack-work/dist/i386-linux/Cabal-1.24.0.0/setup-config
+/home/[...]/hfind/.stack-work/dist/i386-linux/Cabal-1.24.0.0/stack-build-cache
+/home/[...]/hfind/.stack-work/dist/i386-linux/Cabal-1.24.0.0/stack-cabal-mod
+/home/[...]/hfind/.stack-work/dist/i386-linux/Cabal-1.24.0.0/stack-config-cache
+/home/[...]/hfind/.stack-work/install/i386-linux/lts-7.1/8.0.1/bin/hfind
 ```
 
 Equivalent find command: *(?)*
 
-List libraries built by ghc >=7.10 in `.stack-work/` with executable permissions
+List libraries built by ghc >=8.0.1 in `.stack-work/` with executable permissions
 (naive check)
 ```
-$ me=$UID we=$GID ./hfind .stack-work -if '
-       $type == "f"
-    && $name =~ m/lib.*-ghc(\d+)\.(\d+)\.\d+\.so/
-    && scope ( $perms =~ m/..(.) ..(.) ..(.)/x
+$ me=$UID we=$GID ./hfind .stack-work                     \
+     -if '$type == "f"'                                   \
+     -if '$name =~ m/lib.*-ghc(\d+)\.(\d+)\.(\d+)\.so/'   \
+     -let 'major = readint $1'                            \
+     -let 'minor = readint $2'                            \
+     -let 'patch = readint $3'                            \
+     -if '$perms =~ m/..(.) ..(.) ..(.)/x
              && (  ($1 == "x" && $me == tostr $ownerid)
                 || ($2 == "x" && $we == tostr $groupid)
                 ||  $3 == "x"
-                )
-             )
-    && ($1 == "7" && readint $2 >= 10 || readint $1 > 7)'
+                )'                                        \
+     -if '$major*10000 + $minor*100 + $patch >= 80001'
 
 /home/[...]/hfind/.stack-work/dist/i386-linux/Cabal-1.22.4.0/build/libHShfind-0.1.0.0-1bOTNpdR5JrL3TUNaCEMap-ghc7.10.2.so
 /home/[...]/hfind/.stack-work/dist/i386-linux/Cabal-1.22.4.0/build/libHShfind-0.1.0.0-BI81816hJ183CedkmYUeim-ghc7.10.2.so
@@ -201,6 +204,7 @@ TODO:
 - **done** more detailed error messages with context, like GHC (in the second argument of...)
 - **done** review scope semantics
 - **done** actually run commands, and make `print` a built-in special case that's the default
+- **done** let-bindings
 - size/time literals
 - evaluate performance (specially EvalT)
 - allow running the entire process asynchronously (chunked, customizable)

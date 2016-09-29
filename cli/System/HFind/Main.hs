@@ -118,8 +118,15 @@ printEvalError varDump activeMatch (err, bt) = do
 
     forM_ varDump $ \(var, value) ->
         putErr ("    $" <> var <> " = " <> tshow (coerceToString value))
-        `Ex.catch` \(e :: Ex.SomeException) ->
-            putErr ("    $" <> var <> " = <error> " <> tshow e)
+        `Ex.catch` \(e :: Ex.SomeException) -> do
+            let errmsg        = tshow e
+                uninitialised = "Data.Vector.Mutable: uninitialised element"
+
+            -- ugly, but a stack trace is uglier and no way around for now
+            if uninitialised `T.isInfixOf` errmsg then
+                putErr ("    $" <> var <> " = <uninitialised>")
+            else
+                putErr ("    $" <> var <> " = <error> " <> errmsg)
 
     case activeMatch of
         Nothing    -> return ()
@@ -140,6 +147,8 @@ printEvalError varDump activeMatch (err, bt) = do
             Err.ExpectedButFound t1 t2 ->
                 "Type error: '" <> t1 <> "' expected, but found "
                          <> "'" <> t2 <> "'"
+            Err.PrimError msg ->
+                "Fatal error: " <> msg
             Err.NotFound path ->
                 "File/Directory not found: '" <> path <> "'"
             Err.InvalidPathOp path op ->

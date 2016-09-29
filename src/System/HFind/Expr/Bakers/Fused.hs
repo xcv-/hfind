@@ -14,6 +14,8 @@ module System.HFind.Expr.Bakers.Fused
   , PredBaker, runPredBaker
   ) where
 
+import Data.Bitraversable (bitraverse)
+import Data.Int (Int64)
 import Data.Monoid
 
 import Control.Applicative
@@ -97,6 +99,34 @@ instance IsExpr ExprBaker where
                 Just f  -> return (Eval.evalWithin bt . f <=< e)
                 Nothing -> throwError (VarNotFound (NamedVar fname))
 
+    plusE (ExprBaker me1) (ExprBaker me2) src =
+        ExprBaker $ Baker.frame "an addition" src $ do
+            (!e1) <- me1
+            (!e2) <- me2
+            bt <- Baker.getBacktrace
+            return $! (Eval.evalWithin bt .) $! \n -> do
+                x <- expectNum =<< e1 n
+                y <- expectNum =<< e2 n
+                return (toValue (x + y))
+
+    multE (ExprBaker me1) (ExprBaker me2) src =
+        ExprBaker $ Baker.frame "a multiplication" src $ do
+            (!e1) <- me1
+            (!e2) <- me2
+            bt <- Baker.getBacktrace
+            return $! (Eval.evalWithin bt .) $! \n -> do
+                x <- expectNum =<< e1 n
+                y <- expectNum =<< e2 n
+                return (toValue (x * y))
+
+    negE (ExprBaker me) src =
+        ExprBaker $ Baker.frame "a negation" src $ do
+            (!e) <- me
+            bt <- Baker.getBacktrace
+            return $! (Eval.evalWithin bt .) $! \n -> do
+                x <- expectNum =<< e n
+                return (toValue (-x))
+
     interpE pieces src =
         ExprBaker $ Baker.frame "a string interpolation" src $ do
             values <- forM pieces $ \case
@@ -168,17 +198,14 @@ instance IsPred PredBaker where
             (!e1) <- me1
             (!e2) <- me2
 
-            let eval n = liftA2 (,) (e1 n) (e2 n)
-
-            let evalNumeric = eval >=> expect TNum TNum >=> \case
-                    (NumV a, NumV b) -> return (a, b)
-                    _ -> error "System.Posix.Find.Lang.Eval.evalNumeric"
+            let eval2 n = liftA2 (,) (e1 n) (e2 n)
+                asNumbers = bitraverse expectNum expectNum <=< eval2
 
             bt <- Baker.getBacktrace
 
             return $! (Eval.evalWithin bt .) $!
                 case op of
-                    OpEQ -> eval >=> \case
+                    OpEQ -> eval2 >=> \case
                         (BoolV   a, BoolV   b) -> return (a == b)
                         (NumV    a, NumV    b) -> return (a == b)
                         (StringV a, StringV b) -> return (a == b)
@@ -187,16 +214,10 @@ instance IsPred PredBaker where
                             "comparable pair" `ExpectedButFound`
                               (typeNameOf a <> " and " <> typeNameOf b)
 
-                    OpLT -> evalNumeric >=> \(a, b) -> return (a < b)
-                    OpLE -> evalNumeric >=> \(a, b) -> return (a <= b)
-                    OpGT -> evalNumeric >=> \(a, b) -> return (a > b)
-                    OpGE -> evalNumeric >=> \(a, b) -> return (a >= b)
-      where
-        expect :: ValueType -> ValueType -> (Value, Value) -> Eval (Value, Value)
-        expect t1 t2 (a, b)
-          | t1 /= typeOf a = throwError $ t1 `expectedButFound` typeOf a
-          | t2 /= typeOf b = throwError $ t2 `expectedButFound` typeOf b
-          | otherwise      = return (a,b)
+                    OpLT -> asNumbers >=> \(a, b) -> return (a < b)
+                    OpLE -> asNumbers >=> \(a, b) -> return (a <= b)
+                    OpGT -> asNumbers >=> \(a, b) -> return (a > b)
+                    OpGE -> asNumbers >=> \(a, b) -> return (a >= b)
 
     matchP (ExprBaker me) rx capMode src =
         PredBaker $ Baker.frame "a regex match" src $ do
@@ -211,3 +232,14 @@ instance IsPred PredBaker where
                     Just match -> do
                         Eval.setCaptures capMode match
                         return True
+
+
+expectNum :: Value -> Eval Int64
+expectNum = expect TNum >=> \case
+    NumV a -> return a
+    v      -> throwError $ TNum `expectedButFound` typeOf v
+
+expect :: ValueType -> Value -> Eval Value
+expect t a
+  | t == typeOf a = return a
+  | otherwise     = throwError $ t `expectedButFound` typeOf a

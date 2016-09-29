@@ -23,6 +23,7 @@ data VarNotFoundError = VarNotFound !Var
     deriving Show
 
 data RuntimeError = !Text `ExpectedButFound` !Text
+                  | PrimError     !Text
                   | NotFound      !RawPath
                   | InvalidPathOp !RawPath !Text
                   | NativeError   !SomeException

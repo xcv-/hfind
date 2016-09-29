@@ -21,6 +21,7 @@ import Control.Monad.IO.Class
 import Control.Monad.Except
 
 import Data.Int (Int64)
+import Data.Monoid ((<>))
 
 import qualified Data.Text as T
 import Text.Read (readMaybe)
@@ -127,7 +128,9 @@ mkBuiltins root =
     readInt :: T.Text -> m Value
     readInt s = case readMaybe (T.unpack s) of
                     Just i  -> return (NumV i)
-                    Nothing -> return (StringV s)
+                    Nothing -> throwError (PrimError errmsg)
+      where
+        errmsg = "could not parse int: " <> s
 
 
     fn_stat :: T.Text -> m FSAnyNodeR
