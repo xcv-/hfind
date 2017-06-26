@@ -247,7 +247,6 @@ bakeLetBinding name (FusedBaker me) = do
 
     return $! Eval.setVarValue varId <=< e
 
-
 tryCoercion :: forall a b. (IsValue a, IsValue b) => Baker (a :~: b)
 tryCoercion =
     case Typeable.eqT of

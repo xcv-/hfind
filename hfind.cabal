@@ -19,6 +19,7 @@ cabal-version:       >=1.10
 library
   hs-source-dirs:      src
   exposed-modules:     System.HFind.Combinators,
+                       System.HFind.Exec,
                        System.HFind.Expr.Baker,
                        System.HFind.Expr.Bakers,
                        System.HFind.Expr.Bakers.Fused,
@@ -36,7 +37,8 @@ library
   -- other-modules:
   build-depends:       base, exceptions, bifunctors, transformers, mtl, mmorph,
                        unordered-containers, bytestring, vector, text, text-icu,
-                       parsec, pipes, filepath, directory, unix, wl-pprint-text
+                       parsec, pipes, filepath, directory, unix, process,
+                       wl-pprint-text
   default-language:    Haskell2010
   ghc-options:         -Wall -fwarn-incomplete-uni-patterns
 

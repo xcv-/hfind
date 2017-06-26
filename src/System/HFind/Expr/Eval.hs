@@ -47,7 +47,7 @@ import Data.Void (Void)
 import Unsafe.Coerce (unsafeCoerce)
 
 import System.HFind.Expr.Types (Name, TypedName(..),
-                                ErasedValue(..), Value, IsValue(..),
+                                ErasedValue(..), Value,
                                 eraseType, RxCaptureMode(..))
 
 import System.HFind.Expr.Baker (VarId)

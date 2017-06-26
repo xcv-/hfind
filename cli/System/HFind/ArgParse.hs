@@ -13,6 +13,7 @@ import Control.Monad.Trans.Except (ExceptT(..), Except, throwE)
 import Control.Monad.Morph        (hoist, generalize)
 import Control.Monad.IO.Class     (liftIO)
 
+import Data.List (break)
 import Data.Monoid ((<>))
 
 import qualified Data.Text     as T
@@ -44,7 +45,7 @@ import System.HFind.Expr.Bakers (parseLetBinding,
                                  parseFilterPredicate,
                                  parsePrunePredicate,
                                  parseStringInterp,
-                                 parseCmdLine)
+                                 parseExecCmdLine)
 
 import qualified System.HFind.Expr.Error as Err
 
@@ -67,7 +68,8 @@ type ParseState = (Int, [String])
 
 
 checkHelpArg :: [String] -> Bool
-checkHelpArg args = "-h" `elem` args || "--help" `elem` args
+checkHelpArg []      = False
+checkHelpArg (arg:_) = arg == "-h" || arg == "--help"
 
 
 parseFlags :: ParseState -> (ParseState, [FindFlag])
@@ -94,71 +96,80 @@ parseTreeTransforms :: ParseState
                     -> BakerT (Except String) (ParseState, C.TransformR Eval)
 parseTreeTransforms (i, []) =
     return ((i, []), Pipes.cat)
+
 parseTreeTransforms (i, "-prune":expr:args) = do
     let sourceName = "argument #" ++ show (i+1)
     predicate <- parsePrunePredicate sourceName expr
 
     (state', trns) <- parseTreeTransforms (i+2, args)
     return (state', C.pruneDirsM predicate >-> trns)
+
 parseTreeTransforms state = return (state, Pipes.cat)
+
 
 
 parseListTransforms :: ParseState
                     -> BakerT (Except String) (ParseState, C.EntryTransformR Eval)
 parseListTransforms (i, []) =
     return ((i, []), Pipes.cat)
+
 parseListTransforms (i, "-if":expr:args) = do
     let sourceName = "argument #" ++ show (i+1)
     predicate <- parseFilterPredicate sourceName expr
 
     (state', trns) <- parseListTransforms (i+2, args)
     return (state', Pipes.filterM predicate >-> trns)
+
 parseListTransforms (i, "-let":expr:args) = do
     let sourceName = "argument #" ++ show (i+1)
     update <- parseLetBinding sourceName expr
 
     (state', trns) <- parseListTransforms (i+2, args)
     return (state', Pipes.chain update >-> trns)
+
 parseListTransforms state = return (state, Pipes.cat)
 
 
-parseConsumer :: ParseState
-              -> BakerT (Except String) (ParseState, C.EntryConsumerR Eval)
-parseConsumer (i, []) =
+
+parseConsumers :: ParseState
+               -> BakerT (Except String) (ParseState, C.EntryConsumerR Eval)
+parseConsumers (i, []) =
     return ( (i, [])
            , C.asPaths
                >-> C.asFiles
                >-> C.plainText
                >-> Pipes.mapM_ (liftIO . TextIO.putStrLn)
            )
-
-parseConsumer (i, "-print":fmt:args) = do
+parseConsumers (i, "-print":fmt:args) = do
     let sourceName = "argument #" ++ show (i+1)
     format <- parseStringInterp sourceName fmt
+    let consume = liftIO . TextIO.putStrLn <=< format
 
-    (st', consumer) <- if null args
-                         then return ((i+2, args), Pipes.drain)
-                         else parseConsumer (i+2, args)
-    return ( st'
-           , Pipes.chain (liftIO . TextIO.putStrLn <=< format)
-               >-> consumer
-           )
+    (state', consumer) <- parseMoreConsumers (i+2, args)
+    return (state', Pipes.chain consume >-> consumer)
 
-parseConsumer (i, "-exec":args) = do
-    let sources = zip ["argument #" ++ show j | j <- [i+1..]]
-                      args
-    cmd <- parseCmdLine sources
+parseConsumers (i, arg:args) | arg == "-exec" || arg == "-execdir" = do
+      let (argv,   args')  = break (==";") args
+          (offset, args'') = case args' of
+                                 ";":args'' -> (1, args'')
+                                 _          -> (0, args')
 
-    return ( (i+1 + length args, [])
-           , Pipes.mapM_ (liftIO <=< cmd)
-           )
+      let sources = zip ["argument #" ++ show j | j <- [i+1..]] argv
+      exec <- parseExecCmdLine ("argument #" ++ show i) (arg == "-execdir") sources
 
-parseConsumer (i, "-nop":args)
-  | null args = return ((i+1, args), Pipes.drain)
-  | otherwise = parseConsumer (i+2, args)
+      (state', consumer) <- parseMoreConsumers (i+1 + offset + length argv, args'')
+      return (state', Pipes.chain exec >-> consumer)
 
-parseConsumer (i, args) =
-    return ((i, args), Pipes.drain)
+parseConsumers (i, "-nop":args) = parseMoreConsumers (i+1, args)
+
+parseConsumers state = return (state, Pipes.drain)
+
+
+parseMoreConsumers :: ParseState
+                   -> BakerT (Except String) (ParseState, C.EntryConsumerR Eval)
+parseMoreConsumers st@(_, []) = return (st, Pipes.drain)
+parseMoreConsumers st         = parseConsumers st
+
 
 
 parseArgs :: [String] -> ExceptT String IO [Result]
@@ -175,7 +186,7 @@ parseArgs args = do
         ((state, treeTrns), ctx1) <- runBaker path $ parseTreeTransforms state
         ((state, listTrns), ctx2) <- runBaker path $ parseListTransforms state
 
-        ((state, listCons), ctx2) <- runBakerWith ctx2 path $ parseConsumer state
+        ((state, listCons), ctx2) <- runBakerWith ctx2 path $ parseConsumers state
 
         case snd state of
             []    -> return (Result flags path ctx1 treeTrns
@@ -241,21 +252,24 @@ usage :: String
 usage = [r|usage: hfind [-L] <path> [tree transforms] [list transforms] [consumers]
 
 flags:
-  -L                 follow symlinks
+  -L                   Follow symlinks
 
 supported tree transforms:
-  -prune pred:       filter subtrees with root matching pred
+  -prune pred:         Filter subtrees with root matching pred
 
 supported list transforms:
-  -if pred           allow only entries satisfying the predicate pred
-  -let var=expr      define a new variable with value expr
+  -if pred             Allow only entries satisfying the predicate pred
+  -let var=expr        Define a new variable with value expr
 
 supported consumers:
-  -print string      (default) print the string, followed by a new line
-  -exec cmd a1 a2... execute a shell command cmd with arguments a1, a2,...
+  -print string        Print the string, followed by a new line (default)
+  -exec cmd a1... \;   Execute a shell command cmd with arguments a1, a2,...
                        where cmd and a1, a2,... are parsed as individual string
-                       interpolations without quotes
-  -nop               do nothing
+                       interpolations without quotes. The semicolon is optional
+                       and required only if this is not the last argument.
+  -execdir             Same as -exec, but set the working directory to the
+                       directory containing each item.
+  -nop                 Do nothing
 
 predicate syntax:
   scope(pred)   nests a scope, ensuring that regex captures in pred are not

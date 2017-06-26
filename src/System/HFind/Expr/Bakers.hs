@@ -8,37 +8,38 @@ module System.HFind.Expr.Bakers
   , parseFilterPredicate
   , parseLetBinding
   , parseStringInterp
-  , parseCmdLine
+  , parseExecCmdLine
   ) where
 
 import Control.Monad              (forM)
+import Control.Monad.Except       (throwError)
+import Control.Monad.IO.Class     (liftIO)
+import Control.Monad.Morph        (hoist, generalize)
 import Control.Monad.Trans        (lift)
 import Control.Monad.Trans.Except (Except, throwE)
-import Control.Monad.Morph        (hoist, generalize)
 
-import qualified Data.Text          as T
-import qualified Data.Text.Encoding as T
-
-import qualified System.Posix.Process.ByteString as Posix
-import System.IO (hFlush, stdout)
+import qualified Data.Text as T
 
 import Text.Parsec (SourceName)
 
 import System.HFind.Path (Dir)
+import qualified System.HFind.Path as Path
 
-import System.HFind.Types (FSNodeType(Resolved), FSNode(..),
-                           FSAnyNode(..),
-                           ListEntry(..),
-                           NodeListEntry, NodeListEntryR)
+import System.HFind.Types (FSNodeType(Resolved), FSNode(..), FSAnyNode(..),
+                           ListEntry(..), NodeListEntry, NodeListEntryR,
+                           nodePath)
 
 import System.HFind.Expr.Baker (Baker, BakerT)
+import System.HFind.Expr.Error (RuntimeError(InvalidPathOp))
 import System.HFind.Expr.Eval  (Eval)
 
-import qualified System.HFind.Expr.Parser as Parser
 import qualified System.HFind.Expr.Baker  as Baker
+import qualified System.HFind.Expr.Parser as Parser
 
 import System.HFind.Expr.Bakers.Fused (runFusedBaker, runFusedBakerToString,
                                        bakeLetBinding)
+
+import System.HFind.Exec (forkExecOrThrow, forkExecDirOrThrow)
 
 type NodeAction a   = FSAnyNode     'Resolved -> Eval a
 type DirAction a    = FSNode Dir    'Resolved -> Eval a
@@ -47,7 +48,6 @@ type EntryAction a  = NodeListEntry 'Resolved -> Eval a
 type NodePredicate  = NodeAction  Bool
 type DirPredicate   = DirAction   Bool
 type EntryPredicate = EntryAction Bool
-type EntryCommand   = EntryAction (IO ())
 
 
 type M = BakerT (Except String)
@@ -96,37 +96,27 @@ parseLetBinding name s = do
 
     return (p . entryToNode)
 
-parseCmdLine :: [(SourceName, String)] -> M EntryCommand
-parseCmdLine inputs = do
-    args <- forM inputs $ \(name, s) -> do
-                arg <- parseWith runFusedBakerToString Parser.parseCmdLineArg name s
+parseExecCmdLine :: SourceName -> Bool -> [(SourceName, String)] -> M (EntryAction ())
+parseExecCmdLine name isExecDir inputs = do
+    argv <- forM inputs $ \(s_name, s) ->
+                parseWith runFusedBakerToString Parser.parseCmdLineArg s_name s
 
-                return $ \entry ->
-                    fmap T.encodeUtf8 (arg entry)
-
-    return $ \entry -> do
-        let node = entryToNode entry
-
-        (cmd:argv) <- mapM ($ node) args
-
-        return $ do
-            let searchInPath = True
-                environment  = Nothing
-
-            hFlush stdout
-
-            pid <- Posix.forkProcess $
-                       Posix.executeFile cmd searchInPath argv environment
-            wait pid
-
-            hFlush stdout
+    case argv of
+        cmd:args ->
+            return $ \entry -> do
+                let node = entryToNode entry
+                tcmd  <- cmd node
+                targs <- mapM ($ node) args
+                forkExec tcmd targs node
+        [] ->
+            lift $ throwE (name ++ ": Program name was not provided")
   where
-    wait pid = do
-        let block    = True
-            waitStop = False
-
-        -- TODO: do something if the process crashes
-        _ <- Posix.getProcessStatus block waitStop pid
-
-        return ()
-
+    forkExec :: T.Text -> [T.Text] -> NodeAction ()
+    forkExec tcmd targs (AnyNode node)
+      | isExecDir = do
+          let path = nodePath node
+          case Path.parent path of
+              Just parentPath -> liftIO $ forkExecDirOrThrow parentPath tcmd targs
+              Nothing         -> throwError (InvalidPathOp (Path.toText path) "parent")
+      | otherwise =
+          liftIO $ forkExecOrThrow tcmd targs
