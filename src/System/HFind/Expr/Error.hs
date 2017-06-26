@@ -15,22 +15,23 @@ import qualified Text.PrettyPrint.Leijen.Text as PP
 
 import System.HFind.Path (RawPath)
 
-import System.HFind.Expr.Types.AST (Src, Var)
+import System.HFind.Expr.Types.AST (Name, Src, Var)
 import System.HFind.Expr.Types.Value
 
 
-data VarNotFoundError = VarNotFound !Var
+data BakingError = VarNotFound      !Var
+                 | VarAlreadyExists !Name
+                 | !Text `ExpectedButFound` !Text
     deriving Show
 
-data RuntimeError = !Text `ExpectedButFound` !Text
-                  | PrimError     !Text
+data RuntimeError = PrimError     !Text
                   | NotFound      !RawPath
                   | InvalidPathOp !RawPath !Text
                   | NativeError   !SomeException
     deriving Show
 
 
-expectedButFound :: ValueType -> ValueType -> RuntimeError
+expectedButFound :: ValueType -> ValueType -> BakingError
 t `expectedButFound` t' = typeName t `ExpectedButFound` typeName t'
 
 

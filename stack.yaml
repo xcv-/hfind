@@ -1,6 +1,6 @@
 extra-deps: []
-resolver: lts-7.1
-skip-ghc-check: true
+resolver: lts-8.20
+#skip-ghc-check: true
 flags: {}
 packages:
 - '.'

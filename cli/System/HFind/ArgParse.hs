@@ -33,7 +33,7 @@ import qualified System.HFind.Path as Path
 
 import qualified System.HFind.Combinators as C
 
-import System.HFind.Expr.Types.AST (Var(..))
+import System.HFind.Expr.Types (TypedName(..), Var(..), typeName)
 
 import System.HFind.Expr.Baker (BakerT, runBakerT)
 import System.HFind.Expr.Eval  (Eval)
@@ -187,27 +187,33 @@ parseArgs args = do
     fmtIfBadPathError (Left rawPath) = Left ("Invalid path: " ++ show rawPath)
     fmtIfBadPathError (Right a)      = Right a
 
-    tshow  = T.pack . show
     putErr = liftIO . TextIO.hPutStrLn stderr
 
-    reportError ctx notFound bt = do
+    fmtError :: Err.BakingError -> T.Text
+    fmtError (Err.VarNotFound notFound) =
         let name = case notFound of
                        RxCapVar i -> T.pack (show i)
                        NamedVar n -> n
+        in
+           "Variable $" <> name <> " not found"
+    fmtError (Err.VarAlreadyExists name) =
+        "Variable $" <> name <> " is already in scope"
+    fmtError (Err.ExpectedButFound t1 t2) =
+        "Type error: '" <> t1 <> "' expected, but found "
+                 <> "'" <> t2 <> "'"
 
+    reportError ctx err bt = do
         putErr (Err.renderError
-                 (Err.errorWithBacktrace
-                   ("Variable $" <> name <> " not found")
-                   bt))
+                 (Err.errorWithBacktrace (fmtError err) bt))
 
         putErr ""
         putErr "Defined variables:"
-        forM_ (Baker.ctxGetVars ctx) $ \var ->
-            putErr ("    $" <> var)
+        forM_ (Baker.ctxGetVars ctx) $ \(TypedName ty var) ->
+            putErr ("    $" <> var <> ": " <> typeName ty)
 
         case Baker.ctxGetActiveRegex ctx of
             Nothing -> return ()
-            Just rx -> putErr ("\nActive regex: " <> tshow (ICU.pattern rx))
+            Just rx -> putErr ("\nActive regex: " <> ICU.pattern rx)
 
     runBaker :: Path Abs Dir
              -> BakerT (Except String) a
@@ -224,38 +230,49 @@ parseArgs args = do
         case e of
             Right res ->
                 return (res, ctx)
-            Left (Err.VarNotFound notFound, bt) -> do
-                liftIO $ reportError ctx notFound bt
+            Left (err, bt) -> do
+                liftIO $ reportError ctx err bt
                 throwE ""
 
 
 
 
 usage :: String
-usage = [r|usage: hfind [-L] <path> [actions...]
+usage = [r|usage: hfind [-L] <path> [tree transforms] [list transforms] [consumers]
 
 flags:
-  -L           follow symlinks
+  -L                 follow symlinks
 
-supported actions:
-  -if pred:    allow only entries satisfying pred
-  -prune pred: filter subtrees with root matching pred
+supported tree transforms:
+  -prune pred:       filter subtrees with root matching pred
+
+supported list transforms:
+  -if pred           allow only entries satisfying the predicate pred
+  -let var=expr      define a new variable with value expr
+
+supported consumers:
+  -print string      (default) print the string, followed by a new line
+  -exec cmd a1 a2... execute a shell command cmd with arguments a1, a2,...
+                       where cmd and a1, a2,... are parsed as individual string
+                       interpolations without quotes
+  -nop               do nothing
 
 predicate syntax:
-  expr
+  scope(pred)   nests a scope, ensuring that regex captures in pred are not
+                reflected outside
 
-  not (pred)
+  expr (of boolean type)
 
-  pred1 && pred2        pred1 || pred2
+  not(pred)    pred1 and pred2     pred1 or pred2
 
-  expr1 == expr2        expr1 != expr2
-  expr1 >= expr2        expr1 <= expr2
-  expr1 >  expr2        expr1 <  expr2
+  pred1 == pred2        pred1 != pred2
+  pred1 >= pred2        pred1 <= pred2
+  pred1 >  pred2        pred1 <  pred2
 
   expr =~ m/pcre regex/mxsin
 
   valid regex delimiters:
-    / _ @ % # ! $ €
+    / _ @ % # ! , ; |
 
   regex options:
     m: multiline               s: dot matches newlines
@@ -263,18 +280,39 @@ predicate syntax:
     n: do not capture
 
 expression syntax:
-  $var
-  lit
-  "interpolated string with $variables, escape dollars with $$"
+  $variable
+  literal
+  function expr1
+  "interpolated string with $variables, dollars escaped as $$"
+
+  +expr                 -expr
+  expr1 + expr 2        expr1 - expr2
+  expr1 * expr 2        expr1 / expr2
+
+types:
+  string, int (64-bit), bool, fsnode (file metadata)
 
 variable syntax:
   $identifier
-  $previous_regex_capture_index
+  $builtin_function (applies builtin_function to the current node)
+  $environment_variable
+  regex captures: $0, $1, $2...
 
-builtin (magic) variables:
-  $name:   file name
-  $path:   absolute path
-  $hidden: whether $name starts with '.'
+builtin functions:
+  readint : string -> int
+  exists, isfile, isdir, islink : string -> bool
+  stat : string -> fsnode
+
+  parent : fsnode -> fsnode
+  hidden : fsnode -> bool
+  type   : fsnode -> string
+  size   : fsnode -> int
+  nlinks : fsnode -> int
+  perms  : fsnode -> string (e.g. rwxr-xr-x)
+  owner, group : fsnode -> string
+  ownerid, groupid : fsnode -> string
+  name, path, relpath, parentpath, parentname : fsnode -> string
+
 
 literal syntax:
   "string"

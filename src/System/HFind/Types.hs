@@ -108,7 +108,7 @@ nodeStat (FileNode stat _) = stat
 nodeStat (DirNode  stat _) = stat
 
 
-data FSAnyNode s = forall t. AnyNode (FSNode t s)
+data FSAnyNode s = forall t. AnyNode !(FSNode t s)
 
 type FSAnyNodeR = FSAnyNode 'Resolved
 

@@ -47,7 +47,7 @@ $ find ~ -name '.*' -prune -o -printf "found %f somewhere in $HOME"
 
 - Finding git repositories (following symlinks, `-L`)
 ```
-$ ./hfind -L ~ -prune '$hidden' -if '$type == "d" && isdir "$path/.git"'
+$ ./hfind -L ~ -prune '$hidden' -if '$type == "d" and isdir "$path/.git"'
 
 /home/[...]/[...]/repo1
 /home/[...]/[...]/[...]/repo2
@@ -61,7 +61,7 @@ $ find -L ~ -name '.*' -prune -o -type d -exec test -d '{}/.git' \;
 
 - Find all files with the `.hs` extension in the `src` directory, following symlinks.
 ```
-$ ./hfind -L src -if '$type == "f" && $name =~ m|\.hs$|'
+$ ./hfind -L src -if '$type == "f" and $name =~ m|\.hs$|'
 
 /home/[...]/hfind/src/System/HFind/Combinators.hs
 /home/[...]/hfind/src/System/HFind/Expr/Baker.hs
@@ -136,27 +136,26 @@ $ me=$UID we=$GID ./hfind .stack-work                     \
      -let 'minor = readint $2'                            \
      -let 'patch = readint $3'                            \
      -if '$perms =~ m/..(.) ..(.) ..(.)/x
-             && (  ($1 == "x" && $me == tostr $ownerid)
-                || ($2 == "x" && $we == tostr $groupid)
-                ||  $3 == "x"
+             and ( ($1 == "x" and $me == "$ownerid")
+                or ($2 == "x" and $we == "$groupid")
+                or  $3 == "x"
                 )'                                        \
      -if '$major*10000 + $minor*100 + $patch >= 80001'
 
-/home/[...]/hfind/.stack-work/dist/i386-linux/Cabal-1.22.4.0/build/libHShfind-0.1.0.0-1bOTNpdR5JrL3TUNaCEMap-ghc7.10.2.so
-/home/[...]/hfind/.stack-work/dist/i386-linux/Cabal-1.22.4.0/build/libHShfind-0.1.0.0-BI81816hJ183CedkmYUeim-ghc7.10.2.so
-/home/[...]/hfind/.stack-work/install/i386-linux/lts-3.4/7.10.2/lib/i386-linux-ghc-7.10.2/hfind-0.1.0.0-BI81816hJ183CedkmYUeim/libHShfind-0.1.0.0-BI81816hJ183CedkmYUeim-ghc7.10.2.so
+/home/[...]/hfind/.stack-work/dist/i386-linux/Cabal-1.24.0.0/build/libHShfind-0.1.0.0-D8PMEILeDsh4KwcA6t7Cuq-ghc8.0.1.so
+/home/[...]/hfind/.stack-work/install/i386-linux/lts-7.1/8.0.1/lib/i386-linux-ghc-8.0.1/hfind-0.1.0.0-D8PMEILeDsh4KwcA6t7Cuq/libHShfind-0.1.0.0-D8PMEILeDsh4KwcA6t7Cuq-ghc8.0.1.so
 ```
 
 Equivalent find command: *(none)*
 
-Note that captures inside `not (...)` or `(... || ...)`, won't be available
+Note that captures inside `not (...)` or `(... or ...)`, won't be available
 from the outside (`...` is not necessarily true), so these can be used as a
 form of scoping. This can also be done explicitly with `scope (...)`.
 
 Also, if a `$var` itself does not exist, it is first desugared to `var $_currentnode`
 and if this fails as well, `$var` is looked up in the system environment.
 
-For a list of builtin functions, see [Builtins.hs](src/System/Posix/Find/Lang/Builtins.hs)
+For a list of builtin functions, see [Builtins.hs](src/System/Posix/Find/Expr/Builtins.hs)
 
 
 Error reporting:
@@ -166,37 +165,50 @@ Some nice error reporting has been added. For example,
 
 Analyzer error:
 ```
-$ ./hfind src -if '$name =~ m|(.*)\.hs$| && isdir "$parentpath/$2"'
+$ ./hfind src -if '$name =~ m|(.*)\.hs$| and isdir "$parentpath/$2"'
 
 Error at "string literal" (line 1, column 1): Variable $2 not found
     In a regex capture variable: $2
     In a string interpolation: "$parentpath/$2"
     In a function application: isdir "$parentpath/$2"
-    In a conjunction (&&): $name =~ m|(.*)\.hs$| && isdir "$parentpath/$2"
+    In a conjunction (and): $name =~ m|(.*)\.hs$| and isdir "$parentpath/$2"
 
 Defined variables:
-    $_currentnode
 
-Active regex: "(.*)\\.hs$"
+Active regex: (.*)\.hs$
 ```
 
-Runtime error:
+Type error:
 ```
-$ ./hfind src -if '$name =~ m|(.*)\.hs$| && owner "$parentpath/$1" == $USER'
+$ ./hfind src -if '$name =~ m|(.*)\.hs$| and owner "$parentpath/$1" == $USER'
 
 Error at "argument #3" (line 1, column 26): Type error: 'fsnode' expected, but found 'string'
     In a function application: owner "$parentpath/$1"
     In operator (==): owner "$parentpath/$1" == $USER
-    In a conjunction (&&): $name =~ m|(.*)\.hs$| && owner "$parentpath/$1" == $USER
+    In a conjunction (and): $name =~ m|(.*)\.hs$| and owner "$parentpath/$1" == $USER
+
+Defined variables:
+
+Active regex: (.*)\.hs$
+```
+
+Runtime error:
+```
+$ ./hfind src -if '$name =~ m|(.*)\.hs$| and owner (stat "$parentpath/$1") == $USER'
+
+Error at "argument #3" (line 1, column 34): File/Directory not found: '/[...]/hfind/src/System/HFind/Combinators'
+    In a function application: stat "$parentpath/$1"
+    In a function application: owner (stat "$parentpath/$1")
+    In operator (==): owner (stat "$parentpath/$1") == $USER
+    In a conjunction (and): $name =~ m|(.*)\.hs$| and owner (stat "$parentpath/$1") == $USER
 
 Variable dump:
-    $_currentnode = "/home/[...]/hfind/src/System/Posix/Find/Combinators.hs"
+    $_current = "/[...]/hfind/src/System/HFind/Combinators.hs"
 
-Active match: "(.*)\\.hs$"
+Active match: (.*)\.hs$
     $0 = "Combinators.hs"
     $1 = "Combinators"
 ```
-
 
 TODO:
 -----
@@ -205,6 +217,7 @@ TODO:
 - **done** review scope semantics
 - **done** actually run commands, and make `print` a built-in special case that's the default
 - **done** let-bindings
+- **done** static typing
 - size/time literals
 - evaluate performance (specially EvalT)
 - allow running the entire process asynchronously (chunked, customizable)

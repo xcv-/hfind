@@ -1,74 +1,97 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
-module System.HFind.Expr.Types.Value where
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeSynonymInstances #-}
+module System.HFind.Expr.Types.Value
+    ( Value(..)
+    , ErasedValue(..)
+    , ValueType(..)
+    , IsValue(..)
+    , typeName
+    , eraseType
+    , valueToString
+    , anyValueToString
+    ) where
 
 import Data.Int  (Int64)
 
 import Data.Text (Text)
 import qualified Data.Text as T
 
+import Data.Typeable (Typeable)
+
 import qualified System.HFind.Path as Path
 
 import System.HFind.Types (FSAnyNodeR, FSAnyNode(..), nodePath)
 
 
-data Value = BoolV   !Bool
-           | NumV    !Int64
-           | StringV !Text
-           | NodeV   !FSAnyNodeR
-    deriving (Eq)
+data Value a where
+    BoolV   :: !Bool       -> Value Bool
+    IntV    :: !Int64      -> Value Int64
+    StringV :: !Text       -> Value Text
+    NodeV   :: !FSAnyNodeR -> Value FSAnyNodeR
+
+instance Eq (Value t) where
+    BoolV   a == BoolV   b = a == b
+    IntV    a == IntV    b = a == b
+    StringV a == StringV b = a == b
+    NodeV   a == NodeV   b = a == b
+
+
+data ErasedValue where
+    ErasedValue :: !(Value a) -> ErasedValue
 
 data ValueType = TBool | TNum | TString | TNode
     deriving (Eq, Show)
 
+eraseType :: ValueType -> (forall a. Value a) -> ErasedValue
+eraseType ty val =
+    case ty of
+        TBool   -> ErasedValue (val @Bool)
+        TNum    -> ErasedValue (val @Int64)
+        TString -> ErasedValue (val @Text)
+        TNode   -> ErasedValue (val @FSAnyNodeR)
 
-class IsValue a where
-    valueTypeOf :: p a -> ValueType
-    toValue     :: a -> Value
-    fromValue   :: Value -> Maybe a
+class Typeable a => IsValue a where
+    valueTypeOf :: proxy a -> ValueType
+    toValue     :: a -> Value a
+    fromValue   :: Value a -> a
 
 instance IsValue Bool where
     valueTypeOf _ = TBool
-
     toValue = BoolV
-
-    fromValue (BoolV b) = Just b
-    fromValue _         = Nothing
+    fromValue (BoolV b) = b
+    {-# INLINE valueTypeOf #-}
+    {-# INLINE toValue #-}
+    {-# INLINE fromValue #-}
 
 instance IsValue Int64 where
     valueTypeOf _ = TNum
-
-    toValue = NumV
-
-    fromValue (NumV x) = Just x
-    fromValue _        = Nothing
+    toValue = IntV
+    fromValue (IntV n) = n
+    {-# INLINE valueTypeOf #-}
+    {-# INLINE toValue #-}
+    {-# INLINE fromValue #-}
 
 instance IsValue Text where
     valueTypeOf _ = TString
-
     toValue = StringV
-
-    fromValue (StringV s) = Just s
-    fromValue _           = Nothing
+    fromValue (StringV s) = s
+    {-# INLINE valueTypeOf #-}
+    {-# INLINE toValue #-}
+    {-# INLINE fromValue #-}
 
 instance IsValue FSAnyNodeR where
     valueTypeOf _ = TNode
-
     toValue = NodeV
-
-    fromValue (NodeV n) = Just n
-    fromValue _         = Nothing
-
-
-
-typeOf :: Value -> ValueType
-typeOf (BoolV _)   = TBool
-typeOf (NumV _)    = TNum
-typeOf (StringV _) = TString
-typeOf (NodeV _)   = TNode
+    fromValue (NodeV n) = n
+    {-# INLINE valueTypeOf #-}
+    {-# INLINE toValue #-}
+    {-# INLINE fromValue #-}
 
 
 typeName :: ValueType -> Text
@@ -77,15 +100,13 @@ typeName TNum    = "number"
 typeName TString = "string"
 typeName TNode   = "fsnode"
 
-
-typeNameOf :: Value -> Text
-typeNameOf = typeName . typeOf
-
-
-coerceToString :: Value -> Text
-coerceToString = \case
+valueToString :: Value a -> Text
+valueToString = \case
     BoolV   True        -> "true"
     BoolV   False       -> "false"
-    NumV    x           -> T.pack (show x)
+    IntV    x           -> T.pack (show x)
     StringV s           -> s
     NodeV   (AnyNode n) -> Path.toText (nodePath n)
+
+anyValueToString :: ErasedValue -> Text
+anyValueToString (ErasedValue v) = valueToString v

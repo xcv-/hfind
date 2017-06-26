@@ -11,7 +11,7 @@ module System.HFind.Expr.Bakers
   , parseCmdLine
   ) where
 
-import Control.Monad              (forM, (<=<))
+import Control.Monad              (forM)
 import Control.Monad.Trans        (lift)
 import Control.Monad.Trans.Except (Except, throwE)
 import Control.Monad.Morph        (hoist, generalize)
@@ -31,18 +31,14 @@ import System.HFind.Types (FSNodeType(Resolved), FSNode(..),
                            ListEntry(..),
                            NodeListEntry, NodeListEntryR)
 
-import System.HFind.Expr.Types.Value (coerceToString)
-
-import System.HFind.Expr.Baker     (Baker, BakerT)
-import System.HFind.Expr.Eval      (Eval)
-import System.HFind.Expr.Types.AST (Name)
+import System.HFind.Expr.Baker (Baker, BakerT)
+import System.HFind.Expr.Eval  (Eval)
 
 import qualified System.HFind.Expr.Parser as Parser
 import qualified System.HFind.Expr.Baker  as Baker
-import qualified System.HFind.Expr.Eval   as Eval
 
-import System.HFind.Expr.Bakers.Fused (ExprBaker, runExprBaker,
-                                       runPredBaker)
+import System.HFind.Expr.Bakers.Fused (runFusedBaker, runFusedBakerToString,
+                                       bakeLetBinding)
 
 type NodeAction a   = FSAnyNode     'Resolved -> Eval a
 type DirAction a    = FSNode Dir    'Resolved -> Eval a
@@ -73,7 +69,7 @@ parseWith run parse name s =
         Left err -> lift (throwE (show err))
 
 parseNodePredicate :: SourceName -> String -> M NodePredicate
-parseNodePredicate = parseWith runPredBaker Parser.parsePred
+parseNodePredicate = parseWith runFusedBaker Parser.parsePred
 
 parsePrunePredicate :: SourceName -> String -> M DirPredicate
 parsePrunePredicate name s = do
@@ -87,31 +83,26 @@ parseFilterPredicate name s = do
 
     return (p . entryToNode)
 
-parseLetBinding :: SourceName -> String -> M (EntryAction ())
-parseLetBinding name s = do
-    p <- parseWith runLetBinding Parser.parseLetBinding name s
-
-    return (p . entryToNode)
-  where
-    runLetBinding :: (Name, ExprBaker) -> Baker (NodeAction ())
-    runLetBinding (ident, exprBaker) = do
-        varId <- Baker.newVar ident
-        expr  <- runExprBaker exprBaker
-        return (Eval.setVarValue varId <=< expr)
-
 parseStringInterp :: SourceName -> String -> M (NodeListEntryR -> Eval T.Text)
 parseStringInterp name s =
     Baker.readonly $
-        fmap (\f -> fmap coerceToString . f . entryToNode)
-             (parseWith runExprBaker Parser.parseStringInterp name s)
+        fmap (. entryToNode)
+             (parseWith runFusedBakerToString Parser.parseStringInterp name s)
+
+
+parseLetBinding :: SourceName -> String -> M (EntryAction ())
+parseLetBinding name s = do
+    p <- parseWith (uncurry bakeLetBinding) Parser.parseLetBinding name s
+
+    return (p . entryToNode)
 
 parseCmdLine :: [(SourceName, String)] -> M EntryCommand
 parseCmdLine inputs = do
     args <- forM inputs $ \(name, s) -> do
-                arg <- parseWith runExprBaker Parser.parseCmdLineArg name s
+                arg <- parseWith runFusedBakerToString Parser.parseCmdLineArg name s
 
                 return $ \entry ->
-                    fmap (T.encodeUtf8 . coerceToString) (arg entry)
+                    fmap T.encodeUtf8 (arg entry)
 
     return $ \entry -> do
         let node = entryToNode entry

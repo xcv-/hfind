@@ -46,7 +46,7 @@ import System.HFind.Combinators
 import System.HFind.Expr.Bakers
 import System.HFind.Expr.Builtins
 import System.HFind.Expr.Eval
-import System.HFind.Expr.Parser hiding (parseStringInterp)
+import System.HFind.Expr.Parser hiding (parseStringInterp, parseLetBinding)
 import System.HFind.Expr.Types
 
 
@@ -69,7 +69,7 @@ fileToDir = asDirPath
 instance Arbitrary FileName where
     arbitrary = do
         n <- arbitrary
-        if T.null n || n == "." || n == ".." || any (=='/') n
+        if T.null n || n == "." || n == ".." || T.any (=='/') n
           then arbitrary
           else return (FileName n)
 
@@ -105,7 +105,7 @@ instance (m ~ Identity) => Arbitrary (Walk m FileName FileName) where
     shrink (DirP dp mbs) =
       [ DirP dp (each items)
       | subseq <- subseqs
-      , items <- sequence shrink subseq
+      , items <- sequence (shrink subseq)
       ]
       where
         subseqs =

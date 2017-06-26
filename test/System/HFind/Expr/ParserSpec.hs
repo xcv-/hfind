@@ -34,6 +34,9 @@ instance Eq Expr where
     VarE a    == VarE b    = a == b
     InterpE a == InterpE b = a == b
     AppE f x  == AppE g y  = f == g && x == y
+    PlusE a b == PlusE x y = a == x && b == y
+    MultE a b == MultE x y = a == x && b == y
+    NegE a    == NegE b    = a == b
     _         == _         = False
 
 instance Eq Pred where
@@ -65,6 +68,15 @@ spec = do
 
     let ivar n = InterpVar (NoLoc $ NamedVar n)
         irxc i = InterpVar (NoLoc $ RxCapVar i)
+
+    let a +: b = NoLoc (PlusE a b)
+        a *: b = NoLoc (MultE a b)
+        neg a  = NoLoc (NegE a)
+        a -: b = NoLoc (PlusE a (neg b))
+
+        a &: b = NoLoc (AndP a b)
+        a |: b = NoLoc (OrP a b)
+        no a   = NoLoc (NotP a)
 
     describe "System.HFind.Expr.Parser" $ do
         context "exprParser" $ do
@@ -113,6 +125,31 @@ spec = do
                     Right (app "f" (app "g" (var "v")))
 
                 parseE [r|(f g) (g i)|] `shouldSatisfy` isLeft
+
+            it "parses simple arithmetic expressions" $ do
+                parseE [r| 1 + 2 + 3 |] `shouldBe`
+                    Right ((num 1 +: num 2) +: num 3)
+
+                parseE [r| 1 * 2 + 3 * 4 - 5|] `shouldBe`
+                    Right (((num 1 *: num 2) +: (num 3 *: num 4)) -: num 5)
+
+                parseE [r| 1 * (2 + 3) * 4 - 5|] `shouldBe`
+                    Right (((num 1 *: (num 2 +: num 3)) *: num 4) -: num 5)
+
+            it "arithmetic expressions have appropiate precedence" $ do
+                parseP [r| 1 + 2 and 3 + 4 |] `shouldBe`
+                    Right (NoLoc (ExprP (num 1 +: num 2))
+                            &:
+                           NoLoc (ExprP (num 3 +: num 4)))
+
+                parseE [r| f g 2 + 1 |] `shouldBe`
+                    Right (app "f" (app "g" (num 2)) +: num 1)
+
+                parseE [r| 1 + f g $x * 3 + -1 |] `shouldBe`
+                    Right ((num 1 +: (app "f" (app "g" (var "x")) *: num 3)) +: neg (num 1))
+
+                parseE [r| 1 + 2 * f g (1 - 2)|] `shouldBe`
+                    Right (num 1 +: (num 2 *: app "f" (app "g" (num 1 -: num 2))))
 
 
         context "parsePred" $ do
@@ -181,15 +218,11 @@ spec = do
                     Right (NoLoc $ MatchP (var "name") rx Capture)
 
             it "parses and/or left-associatively" $ do
-                let a p q = NoLoc (AndP p q)
-                    o p q = NoLoc (OrP p q)
-                    no p  = NoLoc (NotP p)
+                parseP [r| true and false or true |] `shouldBe`
+                    Right ((trueP &: falseP) |: trueP)
 
-                parseP [r| true && false || true |] `shouldBe`
-                    Right ((trueP `a` falseP) `o` trueP)
+                parseP [r| true and not(false or true) and true |] `shouldBe`
+                    Right ((trueP &: no (falseP |: trueP)) &: trueP)
 
-                parseP [r| true && not(false || true) && true |] `shouldBe`
-                    Right ((trueP `a` no (falseP `o` trueP)) `a` trueP)
-
-                parseP [r| true && (true || true && true) || true |] `shouldBe`
-                    Right ((trueP `a` ((trueP `o` trueP) `a` trueP)) `o` trueP)
+                parseP [r| true and (true or true and true) or true |] `shouldBe`
+                    Right ((trueP &: ((trueP |: trueP) &: trueP)) |: trueP)

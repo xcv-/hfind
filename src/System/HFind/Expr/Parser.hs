@@ -63,7 +63,7 @@ langDef = Tok.LanguageDef
   , Tok.identStart = letter
   , Tok.identLetter = alphaNum <|> char '_'
   , Tok.opStart = Tok.opStart langDef
-  , Tok.opLetter = oneOf ":!#$%&*+./<=>?@\\^|-~"
+  , Tok.opLetter = oneOf ":!#%&*+./<=>?@\\^|-~"
   , Tok.reservedOpNames = ["+", "-", "*", "/",
                            "==", "=~", "<=", ">=", "<", ">"]
   , Tok.reservedNames = ["true", "false", "and", "or", "not", "scope"]
@@ -82,8 +82,8 @@ identifier = T.pack <$> Tok.identifier lang
 parens :: Parser a -> Parser a
 parens = Tok.parens lang
 
-braces :: Parser a -> Parser a
-braces = Tok.braces lang
+-- braces :: Parser a -> Parser a
+-- braces = Tok.braces lang
 
 symbol :: String -> Parser ()
 symbol s = Tok.symbol lang s $> ()
@@ -94,8 +94,8 @@ reserved s = Tok.symbol lang s $> ()
 reservedOp :: String -> Parser ()
 reservedOp s = Tok.reservedOp lang s $> ()
 
-integerLiteral :: Num a => Parser a
-integerLiteral = fromInteger <$> Tok.integer lang
+naturalLiteral :: Num a => Parser a
+naturalLiteral = fromInteger <$> Tok.natural lang
 
 stringLiteral :: Parser Text
 stringLiteral = T.pack <$> Tok.stringLiteral lang
@@ -172,7 +172,8 @@ comparator = try (reservedOp "==" $> OpEQ)
 letBinding :: forall expr. IsExpr expr => Parser (Name, expr)
 letBinding = do
     ident <- identifier
-    reservedOp "="
+    whitespace
+    symbol "="
     e <- expr
     return (ident, e)
 
@@ -219,7 +220,7 @@ exprAtom =
    <?> "expression"
   where
     app :: Parser (SrcLoc -> expr)
-    app = appE <$> identifier <*> expr <?> "function application"
+    app = appE <$> identifier <*> exprAtom <?> "function application"
 
 
 stringInterp :: forall expr. IsExpr expr => Text -> Parser (SrcLoc -> expr)
@@ -269,7 +270,7 @@ stringInterp input = do
 regex :: Parser (Regex, RxCaptureMode)
 regex = flip label "regular expression" $ do
     void (char 'm')
-    delim <- oneOf "/_@%#!€$,;:|"
+    delim <- oneOf "/_@%#!,;|"
 
     let go acc escaped = do
           c <- anyChar
@@ -311,7 +312,7 @@ regex = flip label "regular expression" $ do
 litNoString :: IsLit lit => Parser lit
 litNoString = located (boolL True     <$  try (reserved "true")
                    <|> boolL False    <$  try (reserved "false")
-                   <|> numL           <$> integerLiteral
+                   <|> numL           <$> naturalLiteral
                    <?> "literal")
   where
     numLit = try date <|> try size <?> "numeric literal"

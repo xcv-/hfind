@@ -1,14 +1,15 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE RankNTypes #-}
-{-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE DataKinds #-}
 module System.HFind.Expr.Builtins
     ( Builtins
-    , BuiltinVar
-    , BuiltinFunc
+    , BuiltinVar(..)
+    , BuiltinFunc(..)
     , reservedNames
     , reservedVars
     , reservedFuncs
@@ -39,14 +40,19 @@ import System.HFind.Types (FSNode(..), FSAnyNode(..), FSAnyNodeR,
 import qualified System.HFind.Walk as Walk
 
 import System.HFind.Expr.Types
-import System.HFind.Expr.Error (RuntimeError(..), expectedButFound)
+import System.HFind.Expr.Error (RuntimeError(..))
 
 
 -- m is usually EvalT IO
 
 
-type BuiltinVar  m = FSAnyNodeR -> m Value
-type BuiltinFunc m = Value      -> m Value
+data BuiltinVar  m where
+    BuiltinVar :: IsValue b
+               => (FSAnyNodeR -> m (Value b)) -> BuiltinVar m
+
+data BuiltinFunc m where
+    BuiltinFunc :: (IsValue a, IsValue b)
+                => (Value a -> m (Value b)) -> BuiltinFunc m
 
 data Builtins m = Builtins
     { builtinVars  :: H.HashMap Name (BuiltinVar  m)
@@ -73,27 +79,25 @@ lookupFunc builtins name = H.lookup name (builtinFuncs builtins)
 mkBuiltins :: forall m. (MonadError RuntimeError m, MonadIO m)
            => Path.Path Path.Abs Path.Dir -> Builtins m
 mkBuiltins root =
-    Builtins vars funcs
+    Builtins (H.fromList vars) (H.fromList funcs)
   where
     erase :: (IsValue a, IsValue b) => (a -> m b) -> BuiltinFunc m
-    erase = eraseInput . eraseOutput
+    erase = BuiltinFunc . eraseInput . eraseOutput
 
-    eraseInput :: IsValue a => (a -> m b) -> Value -> m b
-    eraseInput f val =
-        case fromValue val of
-            Just x  -> f x
-            nothing -> throwError $
-                valueTypeOf nothing `expectedButFound` typeOf val
+    eraseInput :: IsValue a => (a -> m b) -> Value a -> m b
+    eraseInput f = f . fromValue
 
-    eraseOutput :: IsValue b => (a -> m b) -> a -> m Value
+    eraseOutput :: IsValue b => (a -> m b) -> a -> m (Value b)
     eraseOutput f = fmap toValue . f
 
+    vars :: [(Name, BuiltinVar m)]
+    vars = []
 
-    vars = H.fromList []
-
-    funcs = H.fromList
-        [ ("tostr",       eraseOutput (return . coerceToString))
-        , ("readint",     eraseInput  readInt)
+    funcs :: [(Name, BuiltinFunc m)]
+    funcs =
+        [ -- no polymorphism yet
+          -- ("tostr",       BuiltinFunc $ eraseOutput (return . valueToString))
+          ("readint",     BuiltinFunc $ eraseInput  readInt)
         , ("stat",        erase fn_stat)
         , ("exists",      erase fn_exists)
         , ("isfile",      erase fn_isfile)
@@ -103,7 +107,7 @@ mkBuiltins root =
         , ("hidden",      erase fn_hidden)
         , ("name",        erase fn_name)
         , ("path",        erase fn_path)
-        , ("relpath",     erase fn_relpath)
+        --, ("relpath",     erase fn_relpath)
         , ("parent",      erase fn_parent)
         , ("parentpath",  erase fn_parentpath)
         , ("parentname",  erase fn_parentname)
@@ -125,9 +129,9 @@ mkBuiltins root =
             Nothing   -> throwError (InvalidPathOp p "canonicalize")
 
 
-    readInt :: T.Text -> m Value
+    readInt :: T.Text -> m (Value Int64)
     readInt s = case readMaybe (T.unpack s) of
-                    Just i  -> return (NumV i)
+                    Just i  -> return (toValue i)
                     Nothing -> throwError (PrimError errmsg)
       where
         errmsg = "could not parse int: " <> s

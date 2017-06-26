@@ -8,7 +8,9 @@ module System.HFind.Main (main) where
 
 import Data.Monoid ((<>))
 import Data.Bifoldable
+import Data.Typeable (cast)
 
+import Data.Text (Text)
 import qualified Data.Text     as T
 import qualified Data.Text.IO  as TextIO
 import qualified Data.Text.ICU as ICU
@@ -34,10 +36,9 @@ import System.HFind.Types
 import qualified System.HFind.Walk        as Walk
 import qualified System.HFind.Combinators as C
 
-import System.HFind.Expr.Types.AST   (Name)
-import System.HFind.Expr.Types.Value (Value(..), toValue, coerceToString)
+import System.HFind.Expr.Types (toValue, valueToString)
 
-import System.HFind.Expr.Eval (Eval, runEvalT, wrapEvalT)
+import System.HFind.Expr.Eval (Eval, runEvalT, wrapEvalT, UninitializedVariableException(..))
 import qualified System.HFind.Expr.Baker as Baker
 import qualified System.HFind.Expr.Eval  as Eval
 import qualified System.HFind.Expr.Error as Err
@@ -73,6 +74,7 @@ buildPipeline parseResult = do
     (Right listCur, listCtx) <- Baker.runBakerT (ArgParse.rootPath parseResult)
                                                 (ArgParse.listContext parseResult)
                                                 (Baker.newVar "_current")
+
     treeEvalCtx <- Eval.newContext treeCtx
     listEvalCtx <- Eval.newContext listCtx
 
@@ -82,29 +84,29 @@ buildPipeline parseResult = do
          >-> hoistListEval listEvalCtx (listTransform listCur)
          >-> hoistListEval listEvalCtx (listConsumer  listCur)
   where
-    setCurrentNode :: Baker.VarId -> FSNode t 'Resolved -> Eval ()
+    setCurrentNode :: Baker.VarId Text -> FSNode t 'Resolved -> Eval ()
     setCurrentNode var n =
         Eval.setVarValue var (toValue (Path.toText (nodePath n)))
 
-    treeTransform :: Baker.VarId -> Pipe (WalkR Eval) (WalkR Eval) Eval ()
+    treeTransform :: Baker.VarId Text -> Pipe (WalkR Eval) (WalkR Eval) Eval ()
     treeTransform curNode =
         Pipes.mapM
           (C.bimapM_ (setCurrentNode curNode) (setCurrentNode curNode))
         >-> ArgParse.treeTransform parseResult
 
-    listTransform :: Baker.VarId -> Pipe NodeListEntryR NodeListEntryR Eval ()
+    listTransform :: Baker.VarId Text -> Pipe NodeListEntryR NodeListEntryR Eval ()
     listTransform curNode =
         Pipes.chain
           (bitraverse_ (setCurrentNode curNode) (setCurrentNode curNode))
         >-> ArgParse.listTransform parseResult
 
-    listConsumer :: Baker.VarId -> Consumer NodeListEntryR Eval ()
+    listConsumer :: Baker.VarId Text -> Consumer NodeListEntryR Eval ()
     listConsumer _ =
         -- already set in listTransform
         ArgParse.listConsumer parseResult
 
 
-printEvalError :: [(Name, Value)]
+printEvalError :: [Eval.RuntimeVar]
                -> Maybe ICU.Match
                -> (Err.RuntimeError, Err.Backtrace)
                -> IO ()
@@ -116,37 +118,31 @@ printEvalError varDump activeMatch (err, bt) = do
     putErr ""
     putErr "Variable dump:"
 
-    forM_ varDump $ \(var, value) ->
-        putErr ("    $" <> var <> " = " <> tshow (coerceToString value))
-        `Ex.catch` \(e :: Ex.SomeException) -> do
-            let errmsg        = tshow e
-                uninitialised = "Data.Vector.Mutable: uninitialised element"
-
-            -- ugly, but a stack trace is uglier and no way around for now
-            if uninitialised `T.isInfixOf` errmsg then
-                putErr ("    $" <> var <> " = <uninitialised>")
-            else
-                putErr ("    $" <> var <> " = <error> " <> errmsg)
+    forM_ varDump $ \(Eval.RuntimeVar var val) ->
+        putErr ("    $" <> var <> " = " <> tshow (valueToString val))
+        `Ex.catch` \(Ex.SomeException e) -> do
+            case cast e of
+                Just UninitializedVariableException ->
+                    putErr ("    $" <> var <> " = <uninitialised>")
+                Nothing ->
+                    putErr ("    $" <> var <> " = <error> " <> tshow e)
 
     case activeMatch of
         Nothing    -> return ()
         Just match -> do
             putErr ""
-            putErr ("Active match: " <> tshow (ICU.pattern match))
+            putErr ("Active match: " <> ICU.pattern match)
 
             forM_ [0 .. ICU.groupCount match] $ \i ->
                 putErr ("    $" <> tshow i <> " = "
                                 <> maybe "<error>" tshow (ICU.group i match))
   where
-    tshow :: Show a => a -> T.Text
+    tshow :: Show a => a -> Text
     tshow = T.pack . show
 
-    errMsg :: T.Text
+    errMsg :: Text
     errMsg =
         case err of
-            Err.ExpectedButFound t1 t2 ->
-                "Type error: '" <> t1 <> "' expected, but found "
-                         <> "'" <> t2 <> "'"
             Err.PrimError msg ->
                 "Fatal error: " <> msg
             Err.NotFound path ->
@@ -174,18 +170,14 @@ runFind parseResult = do
     res <- runExceptT $ Pipes.runEffect $ walk >-> pipe
 
     case res of
-        Right () -> return ()
+        Right () ->
+            return ()
 
         Left (ctx, err) -> do
-            let vars = Baker.ctxGetVars (Eval.ctxGetBakerContext ctx)
-
-            bt   <- Eval.ctxGetBacktrace ctx
-            vals <- Eval.ctxGetValues ctx
-
+            bt          <- Eval.ctxGetBacktrace ctx
+            vars        <- Eval.ctxGetVarValues ctx
             activeMatch <- Eval.ctxGetActiveMatch ctx
-
-            printEvalError (zip vars vals) activeMatch (err, bt)
-
+            printEvalError vars activeMatch (err, bt)
 
 
 

@@ -114,7 +114,10 @@ data Loc a = Loc !a !SrcLoc
     deriving (Eq, Show, Functor, Foldable, Traversable)
 
 newtype NoLoc a = NoLoc a
-    deriving (Eq, Show, Functor, Foldable, Traversable)
+    deriving (Eq, Functor, Foldable, Traversable)
+
+instance Show a => Show (NoLoc a) where
+    showsPrec p (NoLoc a) = showsPrec p a
 
 type Expr = Expr_ NoLoc
 type Pred = Pred_ NoLoc

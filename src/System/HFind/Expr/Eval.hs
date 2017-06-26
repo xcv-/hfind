@@ -1,14 +1,17 @@
-{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE TypeFamilies #-}
 module System.HFind.Expr.Eval
     ( Eval
     , EvalContext
-    , ctxGetValues, ctxGetActiveMatch, ctxGetBacktrace, ctxGetBakerContext
+    , UninitializedVariableException(..)
+    , RuntimeVar(..)
+    , ctxGetVarValues, ctxGetActiveMatch, ctxGetBacktrace, ctxGetBakerContext
     , newContext
     , runEvalT
     , wrapEvalT
@@ -20,26 +23,32 @@ module System.HFind.Expr.Eval
     , evalWithin
     ) where
 
+import Control.Exception (Exception, throw)
+
 import Control.Monad.Trans.Except (throwE)
 
 import Control.Monad.Catch (MonadThrow, MonadCatch, catchAll)
 import Control.Monad.Except
 import Control.Monad.Reader
-
 import Control.Monad.Morph
-
-import Data.Text (Text)
-import qualified Data.Text as T
-
-import qualified Data.Text.ICU as ICU
 
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 
+import Data.Text (Text)
+import qualified Data.Text     as T
+import qualified Data.Text.ICU as ICU
+
 import Data.Vector.Mutable (IOVector)
 import qualified Data.Vector         as V
-import qualified Data.Vector.Mutable as V
+import qualified Data.Vector.Mutable as MV
 
-import System.HFind.Expr.Types (Value(..), RxCaptureMode(..))
+import Data.Void (Void)
+
+import Unsafe.Coerce (unsafeCoerce)
+
+import System.HFind.Expr.Types (Name, TypedName(..),
+                                ErasedValue(..), Value, IsValue(..),
+                                eraseType, RxCaptureMode(..))
 
 import System.HFind.Expr.Baker (VarId)
 import qualified System.HFind.Expr.Baker as Baker
@@ -47,25 +56,39 @@ import qualified System.HFind.Expr.Error as Err
 
 
 data EvalContext = EvalContext
-    { ctxValues       :: IOVector Value -- reversed
-    , ctxActiveMatch  :: IORef (Maybe ICU.Match)
-    , ctxBacktrace    :: IORef Err.Backtrace
-    , ctxBakerContext :: Baker.BakingContext
+    { ctxValues       :: !(IOVector (Value Void)) -- reversed
+    , ctxActiveMatch  :: !(IORef (Maybe ICU.Match))
+    , ctxBacktrace    :: !(IORef Err.Backtrace)
+    , ctxBakerContext :: !(Baker.BakingContext)
     }
+
+data UninitializedVariableException = UninitializedVariableException
+    deriving (Eq, Show)
+instance Exception UninitializedVariableException
 
 newContext :: Baker.BakingContext -> IO EvalContext
 newContext ctx = do
-    vals        <- V.new (Baker.ctxGetNumVars ctx)
+    vals        <- MV.replicate (Baker.ctxGetNumVars ctx)
+                                (throw UninitializedVariableException)
     activeMatch <- newIORef Nothing
     backtrace   <- newIORef Err.emptyBacktrace
 
     return (EvalContext vals activeMatch backtrace ctx)
 
 
-ctxGetValues :: EvalContext -> IO [Value]
-ctxGetValues ctx = do
+data RuntimeVar where
+    RuntimeVar :: !Name -> !(Value t) -> RuntimeVar
+
+ctxGetVarValues :: EvalContext -> IO [RuntimeVar]
+ctxGetVarValues ctx = do
+    let vars = Baker.ctxGetVars (ctxBakerContext ctx)
     values <- V.freeze (ctxValues ctx)
-    return (V.toList values)
+    return (zipWith runtimeVar vars (V.toList values))
+  where
+    runtimeVar :: TypedName -> Value Void -> RuntimeVar
+    runtimeVar (TypedName ty name) val =
+        case eraseType ty (unsafeCoerce val) of
+            ErasedValue val' -> RuntimeVar name val'
 
 ctxGetActiveMatch :: EvalContext -> IO (Maybe ICU.Match)
 ctxGetActiveMatch = readIORef . ctxActiveMatch
@@ -124,7 +147,6 @@ wrapEvalT m = EvalT $ ExceptT $ ReaderT $ \_ -> do
         Right a     -> return (Right a)
 
 
-
 readonly :: MonadIO m => EvalT m a -> EvalT m a
 readonly (EvalT m) = EvalT $ do
     -- variables may change in the action, but the current language does not
@@ -143,20 +165,30 @@ readonly (EvalT m) = EvalT $ do
     return a
 
 
-getVarValue :: (MonadIO m, MonadCatch m) => VarId -> EvalT m Value
+-- evil
+unsafeCoerceValue :: VarId a -> Value Void -> Value a
+unsafeCoerceValue _ = unsafeCoerce
+
+unsafeVoidValue :: VarId a -> Value a -> Value Void
+unsafeVoidValue _ = unsafeCoerce
+
+
+getVarValue :: (MonadIO m, MonadCatch m) => VarId a -> EvalT m (Value a)
 getVarValue i = do
     vals <- EvalT $ asks ctxValues
 
-    liftIO (V.read vals (Baker.varIdNum i))
-    `catchAll` (throwError . Err.NativeError)
+    val <- liftIO (MV.read vals (Baker.varIdNum i))
+             `catchAll` (throwError . Err.NativeError)
+
+    return (unsafeCoerceValue i val)
 
 
-setVarValue :: (MonadIO m, MonadCatch m) => VarId -> Value -> EvalT m ()
+setVarValue :: (MonadIO m, MonadCatch m) => VarId a -> Value a -> EvalT m ()
 setVarValue i val = do
     vals <- EvalT $ asks ctxValues
 
-    liftIO (V.write vals (Baker.varIdNum i) val)
-    `catchAll` (throwError . Err.NativeError)
+    liftIO (MV.write vals (Baker.varIdNum i) (unsafeVoidValue i val))
+      `catchAll` (throwError . Err.NativeError)
 
 
 getCaptureValue :: MonadIO m => Int -> EvalT m Text
