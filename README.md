@@ -155,7 +155,7 @@ form of scoping. This can also be done explicitly with `scope (...)`.
 Also, if a `$var` itself does not exist, it is first desugared to `var $_currentnode`
 and if this fails as well, `$var` is looked up in the system environment.
 
-For a list of builtin functions, see [Builtins.hs](src/System/Posix/Find/Expr/Builtins.hs)
+For a list of builtin functions, see [Builtins.hs](src/System/HFind/Expr/Builtins.hs)
 
 
 Error reporting:
@@ -219,6 +219,7 @@ option). For instance, to convert all MP3 files in ~/music to OGG using
 4 ffmpeg processes,
 ```
 $ ./hfind -j5 ~/music -if '$name =~ m|^(.*)\.mp3$| and not exists "$1.ogg"' -execdir ffmpeg -i '$1.mp3' '$1.ogg'
+```
 
 TODO:
 -----
