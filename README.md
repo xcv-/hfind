@@ -210,6 +210,16 @@ Active match: (.*)\.hs$
     $1 = "Combinators"
 ```
 
+Multithreading:
+---------------
+
+There is some experimental support for multithreading. The implementation
+consists of a single consumer and multiple producers (customizable via the -j
+option). For instance, to convert all MP3 files in ~/music to OGG using
+4 ffmpeg processes,
+```
+$ ./hfind -j5 ~/music -if '$name =~ m|^(.*)\.mp3$| and not exists "$1.ogg"' -execdir ffmpeg -i '$1.mp3' '$1.ogg'
+
 TODO:
 -----
 
@@ -220,7 +230,7 @@ TODO:
 - **done** static typing
 - size/time literals
 - evaluate performance (specially EvalT)
-- allow running the entire process asynchronously (chunked, customizable)
+- **done** allow running the entire process asynchronously (~~chunked~~ multiple consumers, customizable)
 - add a `--dry-run` flag that runs the command in a pure monad (not the
   predicate, that would be impossible due to harmless I/O in builtins like
   `stat`), assuring the lack of side-effects (return a list of outputs to
