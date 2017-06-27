@@ -167,8 +167,9 @@ follow (Symlink _ l n)   =
         Missing p       -> Missing p
         FSCycle p       -> FSCycle p
         _ -> error "System.Posix.Find.Combinators.follow: the impossible happened!"
-follow (Missing p)       = Missing p
-follow (FSCycle l)       = FSCycle l
+follow (Missing p)          = Missing p
+follow (FSCycle l)          = FSCycle l
+follow (PermissionDenied p) = PermissionDenied p
 
 followLinks :: Monad m => Pipe (WalkL m) (WalkN' m) m ()
 followLinks = P.map (bimap follow follow)
@@ -178,19 +179,21 @@ type NodeFilter m s s' = forall t. FSNode t s -> Producer' (FSNode t s') m ()
 
 report :: (MonadIO m, HasLinks s ~ HasLinks s') => NodeFilter m s s'
 report = \case
-    FileNode stat p  -> yield (FileNode stat p)
-    DirNode stat p   -> yield (DirNode stat p)
-    Symlink stat l p -> for (report p) (yield . Symlink stat l)
-    Missing p        -> liftIO $ hPutStrLn stderr ("*** File not found " ++ show p)
-    FSCycle l        -> liftIO $ hPutStrLn stderr ("*** File system cycle at " ++ show l)
+    FileNode stat p    -> yield (FileNode stat p)
+    DirNode stat p     -> yield (DirNode stat p)
+    Symlink stat l p   -> for (report p) (yield . Symlink stat l)
+    Missing p          -> liftIO $ hPutStrLn stderr ("*** File not found " ++ show p)
+    FSCycle l          -> liftIO $ hPutStrLn stderr ("*** File system cycle at " ++ show l)
+    PermissionDenied p -> liftIO $ hPutStrLn stderr ("*** Permission denied: " ++ show p)
 
 silence :: (Monad m, HasLinks s ~ HasLinks s') => NodeFilter m s s'
 silence = \case
-    FileNode stat p  -> yield (FileNode stat p)
-    DirNode stat p   -> yield (DirNode stat p)
-    Symlink stat l p -> for (silence p) (yield . Symlink stat l)
-    Missing _        -> return ()
-    FSCycle _        -> return ()
+    FileNode stat p    -> yield (FileNode stat p)
+    DirNode stat p     -> yield (DirNode stat p)
+    Symlink stat l p   -> for (silence p) (yield . Symlink stat l)
+    Missing _          -> return ()
+    FSCycle _          -> return ()
+    PermissionDenied _ -> return ()
 
 onError :: (Monad m, HasLinks s ~ HasLinks s')
         => NodeFilter m s s' -> Pipe (WalkN m s) (WalkN m s') m ()

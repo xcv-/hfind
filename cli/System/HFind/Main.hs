@@ -52,7 +52,7 @@ type Err = (Eval.EvalContext, Err.RuntimeError)
 type M = ExceptT Err IO
 
 
-data WrappedEitherException e = WrappedEitherException !e
+newtype WrappedEitherException e = WrappedEitherException e
     deriving (Eq, Show)
 
 instance (Show e, Typeable e) => Ex.Exception (WrappedEitherException e)
@@ -87,7 +87,6 @@ runPipeline :: HasLinks s ~ 'False
             => ArgParse.Result
             -> Producer (WalkN M s) M ()
             -> IO (Either Err ())
-              -- -> IO (Consumer (WalkN' M) M ())
 runPipeline parsedArgs producer = do
     (Right treeCur, treeCtx) <- Baker.runBakerT (ArgParse.rootPath parsedArgs)
                                                 (ArgParse.treeContext parsedArgs)

@@ -15,8 +15,6 @@ import Data.Bitraversable
 
 import Data.Text (Text)
 
-import Data.Typeable (Typeable)
-
 import Control.Monad.Catch (Exception)
 
 import Pipes
@@ -74,16 +72,19 @@ data FSNode :: PathType -> FSNodeType -> * where
     Symlink  :: HasLinks  s ~ 'True => FileStatus -> Link -> FSNode t s -> FSNode t    s
     Missing  :: HasErrors s ~ 'True => RawPath                          -> FSNode t    s
     FSCycle  :: HasErrors s ~ 'True => RawPath                          -> FSNode t    s
+    PermissionDenied
+             :: HasErrors s ~ 'True => RawPath                          -> FSNode t    s
 
 instance IsPathType t => Eq (FSNode t s) where
     (==) = nodeEq
 
 instance Show (FSNode t s) where
-    show (FileNode _ p)  = "File      " ++ show p
-    show (DirNode _ p)   = "Directory " ++ show p
-    show (Symlink _ s p) = "Symlink   " ++ show s ++ " -> " ++ show p
-    show (Missing p)     = "Missing   " ++ show p
-    show (FSCycle p)     = "Cycle     " ++ show p
+    show (FileNode _ p)       = "File       " ++ show p
+    show (DirNode _ p)        = "Directory  " ++ show p
+    show (Symlink _ s p)      = "Symlink    " ++ show s ++ " -> " ++ show p
+    show (Missing p)          = "Missing    " ++ show p
+    show (FSCycle p)          = "Cycle      " ++ show p
+    show (PermissionDenied p) = "PermDenied " ++ show p
 
 
 nodeEq :: FSNode t s -> FSNode t' s -> Bool
@@ -148,7 +149,6 @@ instance Bitraversable ListEntry where
 -- errors
 
 newtype FSCycleError = FSCycleError RawPath
-  deriving (Typeable)
 
 instance Show FSCycleError where
     show (FSCycleError p) = "File system cycle at " ++ show p
@@ -157,9 +157,16 @@ instance Exception FSCycleError
 
 
 newtype FileNotFoundError = FileNotFoundError RawPath
-  deriving (Typeable)
 
 instance Show FileNotFoundError where
     show (FileNotFoundError p) = "File not found: " ++ show p
 
 instance Exception FileNotFoundError
+
+
+newtype PermissionDeniedError = PermissionDeniedError RawPath
+
+instance Show PermissionDeniedError where
+    show (PermissionDeniedError p) = "Permission denied: " ++ show p
+
+instance Exception PermissionDeniedError

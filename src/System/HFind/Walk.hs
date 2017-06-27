@@ -132,9 +132,10 @@ walk1 :: forall m s.  (MonadIO m, MonadCatch m, HasErrors s ~ 'True)
       => SymlinkStrategy s
       -> Path Abs Dir
       -> IO (WalkN m s)
-walk1 strat = liftIO . go []
+walk1 strat = go []
   where
-    go visited root = do
+    go :: [Posix.FileID] -> Path Abs Dir -> IO (WalkN m s)
+    go visited root = handling $ do
         (visited', entry) <- discriminatePath strat visited (asFilePath root)
 
         return $
@@ -143,13 +144,14 @@ walk1 strat = liftIO . go []
                 FileP file
 
             DirEntry dir ->
-                DirP dir $ do
+                DirP dir $ handlePermissionDenied $ do
                   contents <- liftIO $ getDirectoryContents (toString root)
+                                `catchAll` \_ -> throwM (PermissionDeniedError (toText root))
 
                   each (sort $ filter valid contents)
                     >-> P.map  (unsafeRelDir . addTrailingSlash . T.pack)
                     >-> P.map  (root </>)
-                    >-> P.mapM (liftIO . handling . go visited')
+                    >-> P.mapM (liftIO . go visited')
 
     valid :: FilePath -> Bool
     valid ""   = False
@@ -158,5 +160,8 @@ walk1 strat = liftIO . go []
     valid _    = True
 
     handling :: IO (WalkN m s) -> IO (WalkN m s)
-    handling = handle (\(FSCycleError l)      -> return (FileP (FSCycle l)))
-             . handle (\(FileNotFoundError p) -> return (FileP (Missing p)))
+    handling = handle (\(FSCycleError l)          -> return (FileP (FSCycle l)))
+             . handle (\(FileNotFoundError p)     -> return (FileP (Missing p)))
+
+    handlePermissionDenied :: Producer' (WalkN m s) m () -> Producer' (WalkN m s) m ()
+    handlePermissionDenied = handle (\(PermissionDeniedError p) -> yield (FileP (PermissionDenied p)))
