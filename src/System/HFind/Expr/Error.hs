@@ -21,13 +21,15 @@ import System.HFind.Expr.Types.Value
 
 data BakingError = VarNotFound      !Var
                  | VarAlreadyExists !Name
+                 | FuncNotFound     !Name
                  | !Text `ExpectedButFound` !Text
     deriving Show
 
-data RuntimeError = PrimError     !Text
-                  | NotFound      !RawPath
-                  | InvalidPathOp !RawPath !Text
-                  | NativeError   !SomeException
+data RuntimeError = PrimError       !Text
+                  | NotFound        !RawPath
+                  | InvalidPathOp   !RawPath !Text
+                  | NonZeroExitCode !Text ![Text] !Int
+                  | NativeError     !SomeException
     deriving Show
 
 

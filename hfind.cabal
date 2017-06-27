@@ -37,10 +37,10 @@ library
   -- other-modules:
   build-depends:       base, exceptions, bifunctors, transformers, mtl, mmorph,
                        unordered-containers, bytestring, vector, text, text-icu,
-                       parsec, pipes, filepath, directory, unix, process,
+                       filepath, directory, unix, process, parsec, pipes,
                        wl-pprint-text
   default-language:    Haskell2010
-  ghc-options:         -Wall -fwarn-incomplete-uni-patterns
+  ghc-options:         -O2 -threaded -Wall -fwarn-incomplete-uni-patterns
 
 executable hfind
   hs-source-dirs:      cli
@@ -49,10 +49,11 @@ executable hfind
                        System.HFind.Main
   build-depends:       base, exceptions, bifunctors, transformers, mtl, mmorph,
                        text, text-icu,
-                       pipes, filepath, directory, unix, raw-strings-qq,
+                       pipes, async, pipes-concurrency, filepath, directory, unix,
+                       raw-strings-qq,
                        hfind
   default-language:    Haskell2010
-  ghc-options:         -Wall -fwarn-incomplete-uni-patterns
+  ghc-options:         -O2 -threaded -Wall -fwarn-incomplete-uni-patterns
 
 test-suite spec
   type:                exitcode-stdio-1.0

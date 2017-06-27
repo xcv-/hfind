@@ -1,15 +1,15 @@
 module System.HFind.Exec
-  ( ExitCodeException(..)
-  , forkExecWithExitCode
+  ( forkExecWithExitCode
   , forkExecOrThrow
   , forkExecDirWithExitCode
   , forkExecDirOrThrow
   ) where
 
-import Control.Exception (Exception, throwIO)
-
 import Data.Text (Text)
 import qualified Data.Text as T
+
+import Control.Monad.Except   (throwError)
+import Control.Monad.IO.Class (MonadIO(liftIO))
 
 import qualified System.Process as Proc
 import System.IO (hFlush, stdout, stderr)
@@ -18,11 +18,9 @@ import System.Exit (ExitCode(..))
 import System.HFind.Path (Path, Abs, Dir)
 import qualified System.HFind.Path as Path
 
+import System.HFind.Expr.Eval (Eval)
+import System.HFind.Expr.Error (RuntimeError(..))
 
-data ExitCodeException = NonZeroExitCodeError Int
-    deriving (Eq, Show)
-
-instance Exception ExitCodeException
 
 procTextArgs :: Text -> [Text] -> Proc.CreateProcess
 procTextArgs tcmd targs =
@@ -30,8 +28,8 @@ procTextArgs tcmd targs =
         args = map T.unpack targs
     in  Proc.proc cmd args
 
-forkWithExitCode :: Proc.CreateProcess -> IO ExitCode
-forkWithExitCode proc = do
+forkWithExitCode :: MonadIO m => Proc.CreateProcess -> m ExitCode
+forkWithExitCode proc = liftIO $ do
     hFlush stdout
     hFlush stderr
     ec <- Proc.withCreateProcess proc $ \_ _ _ ->
@@ -40,24 +38,24 @@ forkWithExitCode proc = do
     hFlush stderr
     return ec
 
-forkExecWithExitCode :: Text -> [Text] -> IO ExitCode
+forkExecWithExitCode :: MonadIO m => Text -> [Text] -> m ExitCode
 forkExecWithExitCode tcmd targs =
     forkWithExitCode (procTextArgs tcmd targs)
 
-forkExecDirWithExitCode :: Path Abs Dir -> Text -> [Text] -> IO ExitCode
+forkExecDirWithExitCode :: MonadIO m => Path Abs Dir -> Text -> [Text] -> m ExitCode
 forkExecDirWithExitCode path tcmd targs =
     forkWithExitCode (procTextArgs tcmd targs) {
         Proc.cwd = Just (T.unpack (Path.toText path))
     }
 
-checkExitCode :: ExitCode -> IO ()
-checkExitCode ExitSuccess      = return ()
-checkExitCode (ExitFailure ec) = throwIO (NonZeroExitCodeError ec)
+checkExitCode :: Text -> [Text] -> ExitCode -> Eval ()
+checkExitCode _   _    ExitSuccess      = return ()
+checkExitCode cmd args (ExitFailure ec) = throwError (NonZeroExitCode cmd args ec)
 
-forkExecOrThrow :: Text -> [Text] -> IO ()
+forkExecOrThrow :: Text -> [Text] -> Eval ()
 forkExecOrThrow tcmd targs =
-    checkExitCode =<< forkExecWithExitCode tcmd targs
+    checkExitCode tcmd targs =<< forkExecWithExitCode tcmd targs
 
-forkExecDirOrThrow :: Path Abs Dir -> Text -> [Text] -> IO ()
+forkExecDirOrThrow :: Path Abs Dir -> Text -> [Text] -> Eval ()
 forkExecDirOrThrow path tcmd targs =
-    checkExitCode =<< forkExecDirWithExitCode path tcmd targs
+    checkExitCode tcmd targs =<< forkExecDirWithExitCode path tcmd targs

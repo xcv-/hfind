@@ -8,7 +8,7 @@ module System.HFind.Main (main) where
 
 import Data.Monoid ((<>))
 import Data.Bifoldable
-import Data.Typeable (cast)
+import Data.Typeable (Typeable, cast)
 
 import Data.Text (Text)
 import qualified Data.Text     as T
@@ -19,15 +19,18 @@ import Control.Monad              (forM_)
 import Control.Monad.Morph        (hoist)
 import Control.Monad.Trans.Except (ExceptT, runExceptT)
 
+import Control.Concurrent       (setNumCapabilities)
+import Control.Concurrent.Async (concurrently_, replicateConcurrently_)
 import qualified Control.Exception as Ex
 
 import System.Environment (getArgs)
 import System.Exit        (exitFailure, die)
 import System.IO          (stderr)
 
-import Pipes (Pipe, Consumer, (>->))
-import qualified Pipes         as Pipes
-import qualified Pipes.Prelude as Pipes
+import Pipes (Pipe, Producer, Consumer, (>->))
+import qualified Pipes            as Pipes
+import qualified Pipes.Concurrent as PipesConc
+import qualified Pipes.Prelude    as Pipes
 
 import qualified System.HFind.Path as Path
 
@@ -45,10 +48,24 @@ import qualified System.HFind.Expr.Error as Err
 
 import qualified System.HFind.ArgParse as ArgParse
 
+type Err = (Eval.EvalContext, Err.RuntimeError)
+type M = ExceptT Err IO
 
 
-type M = ExceptT (Eval.EvalContext, Err.RuntimeError) IO
+data WrappedEitherException e = WrappedEitherException !e
+    deriving (Eq, Show)
 
+instance (Show e, Typeable e) => Ex.Exception (WrappedEitherException e)
+
+eitherToException :: (Show e, Typeable e) => Either e () -> IO ()
+eitherToException (Right ()) = return ()
+eitherToException (Left e)   = Ex.throwIO (WrappedEitherException e)
+
+exceptionToEither :: (Show e, Typeable e) => IO () -> IO (Either e ())
+exceptionToEither m =
+    fmap Right m
+      `Ex.catch` \(WrappedEitherException e) ->
+          return (Left e)
 
 hoistTreeEval :: Eval.EvalContext
               -> Pipe (WalkR Eval) (WalkR Eval) Eval ()
@@ -66,23 +83,60 @@ hoistListEval ctx pipe =
     hoist (runEvalT ctx) pipe
 
 
-buildPipeline :: ArgParse.Result -> IO (Consumer (WalkN' M) M ())
-buildPipeline parseResult = do
-    (Right treeCur, treeCtx) <- Baker.runBakerT (ArgParse.rootPath parseResult)
-                                                (ArgParse.treeContext parseResult)
+runPipeline :: HasLinks s ~ 'False
+            => ArgParse.Result
+            -> Producer (WalkN M s) M ()
+            -> IO (Either Err ())
+              -- -> IO (Consumer (WalkN' M) M ())
+runPipeline parsedArgs producer = do
+    (Right treeCur, treeCtx) <- Baker.runBakerT (ArgParse.rootPath parsedArgs)
+                                                (ArgParse.treeContext parsedArgs)
                                                 (Baker.newVar "_current")
-    (Right listCur, listCtx) <- Baker.runBakerT (ArgParse.rootPath parseResult)
-                                                (ArgParse.listContext parseResult)
+    (Right listCur, listCtx) <- Baker.runBakerT (ArgParse.rootPath parsedArgs)
+                                                (ArgParse.listContext parsedArgs)
                                                 (Baker.newVar "_current")
 
-    treeEvalCtx <- Eval.newContext treeCtx
-    listEvalCtx <- Eval.newContext listCtx
+    nThreads <- ArgParse.getNumThreads parsedArgs
 
-    return $ C.onError C.report
-         >-> hoistTreeEval treeEvalCtx (treeTransform treeCur)
-         >-> C.flatten
-         >-> hoistListEval listEvalCtx (listTransform listCur)
-         >-> hoistListEval listEvalCtx (listConsumer  listCur)
+    if nThreads == 1 then do
+        treeEvalCtx <- Eval.newContext treeCtx
+        listEvalCtx <- Eval.newContext listCtx
+
+        runExceptT $ Pipes.runEffect $
+            producer
+              >-> C.onError C.report
+              >-> hoistTreeEval treeEvalCtx (treeTransform treeCur)
+              >-> C.flatten
+              >-> hoistListEval listEvalCtx (listTransform listCur)
+              >-> hoistListEval listEvalCtx (listConsumer  listCur)
+    else do
+        (output, input) <- PipesConc.spawn PipesConc.unbounded
+
+        let mainThread = do
+              treeEvalCtx <- Eval.newContext treeCtx
+
+              r <- runExceptT $ Pipes.runEffect $
+                  producer
+                    >-> C.onError C.report
+                    >-> hoistTreeEval treeEvalCtx (treeTransform treeCur)
+                    >-> C.flatten
+                    >-> PipesConc.toOutput output
+              PipesConc.performGC
+              eitherToException r
+
+        let workerThread = do
+              listEvalCtx <- Eval.newContext listCtx
+
+              r <- runExceptT $ Pipes.runEffect $
+                     PipesConc.fromInput input
+                       >-> hoistListEval listEvalCtx (listTransform listCur)
+                       >-> hoistListEval listEvalCtx (listConsumer  listCur)
+              PipesConc.performGC
+              eitherToException r
+
+        exceptionToEither $
+            concurrently_ mainThread
+                         (replicateConcurrently_ (nThreads-1) workerThread)
   where
     setCurrentNode :: Baker.VarId Text -> FSNode t 'Resolved -> Eval ()
     setCurrentNode var n =
@@ -92,18 +146,18 @@ buildPipeline parseResult = do
     treeTransform curNode =
         Pipes.mapM
           (C.bimapM_ (setCurrentNode curNode) (setCurrentNode curNode))
-        >-> ArgParse.treeTransform parseResult
+        >-> ArgParse.treeTransform parsedArgs
 
     listTransform :: Baker.VarId Text -> Pipe NodeListEntryR NodeListEntryR Eval ()
     listTransform curNode =
         Pipes.chain
           (bitraverse_ (setCurrentNode curNode) (setCurrentNode curNode))
-        >-> ArgParse.listTransform parseResult
+        >-> ArgParse.listTransform parsedArgs
 
     listConsumer :: Baker.VarId Text -> Consumer NodeListEntryR Eval ()
     listConsumer _ =
         -- already set in listTransform
-        ArgParse.listConsumer parseResult
+        ArgParse.listConsumer parsedArgs
 
 
 printEvalError :: [Eval.RuntimeVar]
@@ -150,24 +204,25 @@ printEvalError varDump activeMatch (err, bt) = do
             Err.InvalidPathOp path op ->
                 "Invalid path operation: trying to perform '"
                     <> op <> "' on '" <> path <> "'"
+            Err.NonZeroExitCode cmd args ec ->
+                "Program finished with errors: " <> T.intercalate " " (cmd:args)
+                    <> " (exit code " <> tshow ec <> ")"
             Err.NativeError e ->
                 "Native exception raised during evaluation: " <> tshow e
 
 
 
 runFind :: ArgParse.Result -> IO ()
-runFind parseResult = do
-    let path   = ArgParse.rootPath parseResult
-        follow = ArgParse.FollowLinks `elem` ArgParse.findFlags parseResult
+runFind parsedArgs = do
+    let path   = ArgParse.rootPath parsedArgs
+        follow = ArgParse.FollowLinks `elem` ArgParse.findFlags parsedArgs
 
     let following = Walk.walk Walk.followSymlinks   path >-> C.followLinks
         symlinks  = Walk.walk Walk.symlinksAreFiles path
 
     let walk = if follow then following else symlinks
 
-    pipe <- buildPipeline parseResult
-
-    res <- runExceptT $ Pipes.runEffect $ walk >-> pipe
+    res <- runPipeline parsedArgs walk
 
     case res of
         Right () ->
@@ -179,13 +234,13 @@ runFind parseResult = do
             activeMatch <- Eval.ctxGetActiveMatch ctx
             printEvalError vars activeMatch (err, bt)
 
-
-
 main :: IO ()
 main = do
-    parseResults <- getArgs >>= runExceptT . ArgParse.parseArgs >>= \case
+    parsedArgs <- getArgs >>= runExceptT . ArgParse.parseArgs >>= \case
         Right res -> return res
         Left err | null err  -> exitFailure
                  | otherwise -> die $ "error parsing arguments: " ++ err
 
-    mapM_ runFind parseResults
+    forM_ parsedArgs $ \pathCfg -> do
+        setNumCapabilities =<< ArgParse.getNumThreads pathCfg
+        runFind pathCfg

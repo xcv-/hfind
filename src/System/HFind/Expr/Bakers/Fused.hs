@@ -109,7 +109,7 @@ instance IsExpr FusedBaker where
                     (!e) <- typeCheckValue =<< me
                     withBacktrace $! f <=< e
 
-                Nothing -> throwError (VarNotFound (NamedVar fname))
+                Nothing -> throwError (FuncNotFound fname)
 
 
     plusE fb1 fb2 src =

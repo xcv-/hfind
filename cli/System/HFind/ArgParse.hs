@@ -6,22 +6,30 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeFamilies #-}
-module System.HFind.ArgParse where
+module System.HFind.ArgParse
+  ( FindFlag(..)
+  , Result(..)
+  , getNumThreads
+  , parseArgs
+  ) where
+
+import qualified GHC.Conc as GHC
 
 import Control.Monad              (when, forM, forM_, (<=<))
 import Control.Monad.Trans.Except (ExceptT(..), Except, throwE)
 import Control.Monad.Morph        (hoist, generalize)
 import Control.Monad.IO.Class     (liftIO)
 
-import Data.List (break)
+import Data.List (break, isPrefixOf)
 import Data.Monoid ((<>))
+import Text.Read (readMaybe)
 
 import qualified Data.Text     as T
 import qualified Data.Text.IO  as TextIO
 import qualified Data.Text.ICU as ICU
 
-import System.Exit        (die, exitSuccess)
-import System.IO          (stderr)
+import System.Exit (die, exitSuccess)
+import System.IO   (stderr)
 
 import Pipes ((>->))
 import qualified Pipes         as Pipes
@@ -50,7 +58,7 @@ import System.HFind.Expr.Bakers (parseLetBinding,
 import qualified System.HFind.Expr.Error as Err
 
 
-data FindFlag = FollowLinks | DryRun
+data FindFlag = FollowLinks | DryRun | Parallel (Maybe Int)
     deriving (Eq, Show)
 
 
@@ -64,6 +72,13 @@ data Result = Result
     , listConsumer  :: C.EntryConsumerR Eval
     }
 
+getNumThreads :: Result -> IO Int
+getNumThreads result =
+    case [ n | Parallel n <- findFlags result ] of
+        []        -> return 1
+        Nothing:_ -> GHC.getNumProcessors
+        Just n:_  -> return n
+
 type ParseState = (Int, [String])
 
 
@@ -73,9 +88,14 @@ checkHelpArg (arg:_) = arg == "-h" || arg == "--help"
 
 
 parseFlags :: ParseState -> (ParseState, [FindFlag])
-parseFlags (i, "-n":args) = fmap (DryRun:)      $ parseFlags (i+1, args)
-parseFlags (i, "-L":args) = fmap (FollowLinks:) $ parseFlags (i+1, args)
-parseFlags (i,      args) = ((i, args), [])
+parseFlags (i, "-n":args) = fmap (DryRun:)           $ parseFlags (i+1, args)
+parseFlags (i, "-L":args) = fmap (FollowLinks:)      $ parseFlags (i+1, args)
+parseFlags (i, "-j":args) = fmap (Parallel Nothing:) $ parseFlags (i+1, args)
+parseFlags (i,   jN:args)
+  | "-j" `isPrefixOf` jN
+  , Just n <- readMaybe (drop 2 jN)
+  = fmap (Parallel (Just n):) $ parseFlags (i+1, args)
+parseFlags (i, args) = ((i, args), [])
 
 
 parsePathArgs :: ParseState
@@ -207,6 +227,8 @@ parseArgs args = do
                        NamedVar n -> n
         in
            "Variable $" <> name <> " not found"
+    fmtError (Err.FuncNotFound name) =
+        "No function called " <> name <> " exists"
     fmtError (Err.VarAlreadyExists name) =
         "Variable $" <> name <> " is already in scope"
     fmtError (Err.ExpectedButFound t1 t2) =
@@ -253,6 +275,9 @@ usage = [r|usage: hfind [-L] <path> [tree transforms] [list transforms] [consume
 
 flags:
   -L                   Follow symlinks
+  -jN                  Use one producer and (N-1) consumer threads. Particularly
+                       appropriate with -exec. If N is ommited, it defaults to
+                       the number of available processors.
 
 supported tree transforms:
   -prune pred:         Filter subtrees with root matching pred

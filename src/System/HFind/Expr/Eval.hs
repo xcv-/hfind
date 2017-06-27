@@ -59,8 +59,11 @@ data EvalContext = EvalContext
     { ctxValues       :: !(IOVector (Value Void)) -- reversed
     , ctxActiveMatch  :: !(IORef (Maybe ICU.Match))
     , ctxBacktrace    :: !(IORef Err.Backtrace)
-    , ctxBakerContext :: !(Baker.BakingContext)
+    , ctxBakerContext :: !Baker.BakingContext
     }
+
+instance Show EvalContext where
+    show _ = "<ctx>"
 
 data UninitializedVariableException = UninitializedVariableException
     deriving (Eq, Show)

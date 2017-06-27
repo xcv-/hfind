@@ -13,7 +13,6 @@ module System.HFind.Expr.Bakers
 
 import Control.Monad              (forM)
 import Control.Monad.Except       (throwError)
-import Control.Monad.IO.Class     (liftIO)
 import Control.Monad.Morph        (hoist, generalize)
 import Control.Monad.Trans        (lift)
 import Control.Monad.Trans.Except (Except, throwE)
@@ -116,7 +115,7 @@ parseExecCmdLine name isExecDir inputs = do
       | isExecDir = do
           let path = nodePath node
           case Path.parent path of
-              Just parentPath -> liftIO $ forkExecDirOrThrow parentPath tcmd targs
+              Just parentPath -> forkExecDirOrThrow parentPath tcmd targs
               Nothing         -> throwError (InvalidPathOp (Path.toText path) "parent")
       | otherwise =
-          liftIO $ forkExecOrThrow tcmd targs
+          forkExecOrThrow tcmd targs
