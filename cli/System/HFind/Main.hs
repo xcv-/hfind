@@ -109,7 +109,7 @@ runPipeline parsedArgs producer = do
               >-> hoistListEval listEvalCtx (listTransform listCur)
               >-> hoistListEval listEvalCtx (listConsumer  listCur)
     else do
-        (output, input) <- PipesConc.spawn PipesConc.unbounded
+        (output, input) <- PipesConc.spawn (PipesConc.bounded (nThreads*100))
 
         let mainThread = do
               treeEvalCtx <- Eval.newContext treeCtx
