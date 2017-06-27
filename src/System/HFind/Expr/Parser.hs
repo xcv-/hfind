@@ -89,7 +89,7 @@ symbol :: String -> Parser ()
 symbol s = Tok.symbol lang s $> ()
 
 reserved :: String -> Parser ()
-reserved s = Tok.symbol lang s $> ()
+reserved s = Tok.reserved lang s
 
 reservedOp :: String -> Parser ()
 reservedOp s = Tok.reservedOp lang s $> ()
@@ -143,7 +143,7 @@ predicateValue = parens predicate
 
     negation :: Parser pre
     negation = located $
-        notP <$> (reserved "not" *> parens predicate)
+        notP <$> (reserved "not" *> predicateValue)
 
     exprPred :: Parser pre
     exprPred = located $ do
@@ -162,11 +162,11 @@ predicateValue = parens predicate
               ]
 
 comparator :: Parser Op
-comparator = try (reservedOp "==" $> OpEQ)
-         <|> try (reservedOp "<=" $> OpLE)
-         <|> try (reservedOp ">=" $> OpGE)
-         <|> try (reservedOp "<"  $> OpLT)
-         <|> try (reservedOp ">"  $> OpGT)
+comparator = (reservedOp "==" $> OpEQ)
+         <|> (reservedOp "<=" $> OpLE)
+         <|> (reservedOp ">=" $> OpGE)
+         <|> (reservedOp "<"  $> OpLT)
+         <|> (reservedOp ">"  $> OpGT)
          <?> "comparison operator"
 
 letBinding :: forall expr. IsExpr expr => Parser (Name, expr)
@@ -310,8 +310,8 @@ regex = flip label "regular expression" $ do
 
 
 litNoString :: IsLit lit => Parser lit
-litNoString = located (boolL True     <$  try (reserved "true")
-                   <|> boolL False    <$  try (reserved "false")
+litNoString = located (boolL True     <$  reserved "true"
+                   <|> boolL False    <$  reserved "false"
                    <|> numL           <$> naturalLiteral
                    <?> "literal")
   where

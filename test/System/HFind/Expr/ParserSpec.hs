@@ -165,6 +165,13 @@ spec = do
                 parseP [r|"asdf$q"|] `shouldBe`
                     Right (NoLoc $ ExprP $ NoLoc $ InterpE ["asdf", ivar "q"])
 
+            it "parses function applications overlapping with keywords" $ do
+                parseP [r|stat "asdf"|] `shouldBe`
+                    Right (NoLoc $ ExprP $ NoLoc $ AppE "stat" (str "asdf"))
+
+                parseP [r|note 3|] `shouldBe`
+                    Right (NoLoc $ ExprP $ NoLoc $ AppE "note" (num 3))
+
             it "parses explicit scopes" $ do
                 parseP [r|scope(true)|] `shouldBe`
                     Right (NoLoc $ ScopeP $ NoLoc $ ExprP true)
@@ -216,6 +223,16 @@ spec = do
 
                 parseP (" $name =~ m#" <> pat <> "#ix ") `shouldBe`
                     Right (NoLoc $ MatchP (var "name") rx Capture)
+
+            it "not takes precedence over and/or" $ do
+                parseP [r| not true |] `shouldBe`
+                    Right (no trueP)
+
+                parseP [r| not true and false |] `shouldBe`
+                    Right (no trueP &: falseP)
+
+                parseP [r| not true and not false or true|] `shouldBe`
+                    Right (no trueP &: no falseP |: trueP)
 
             it "parses and/or left-associatively" $ do
                 parseP [r| true and false or true |] `shouldBe`
