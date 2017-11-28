@@ -91,7 +91,11 @@ mkBuiltins root =
     eraseOutput f = fmap toValue . f
 
     vars :: [(Name, BuiltinVar m)]
-    vars = []
+    vars =
+        [ ("root",  BuiltinVar $ \_ -> return rootValue)
+        ]
+      where
+        rootValue = toValue (Path.toText root)
 
     funcs :: [(Name, BuiltinFunc m)]
     funcs =
@@ -123,8 +127,10 @@ mkBuiltins root =
 
     canonicalize :: RawPath -> m (Path Abs File)
     canonicalize "" = throwError (InvalidPathOp "" "canonicalize")
-    canonicalize p =
-        case Path.canonicalizeUnder root p of
+    canonicalize p = do
+        -- case Path.canonicalizeUnder root p of
+        mp <- liftIO $ Path.canonicalizeFromHere p
+        case mp of
             Just path -> return path
             Nothing   -> throwError (InvalidPathOp p "canonicalize")
 

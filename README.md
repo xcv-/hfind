@@ -218,7 +218,7 @@ consists of a single producer and multiple consumers (customizable via the -j
 option). For instance, run this command to convert all MP3 files in ~/music to
 OGG using 4 ffmpeg processes:
 ```
-$ ./hfind -j5 ~/music -if '$name =~ m|^(.*)\.mp3$| and not exists "$1.ogg"' -execdir ffmpeg -i '$1.mp3' '$1.ogg'
+$ ./hfind -j5 ~/music -if '$name =~ m|^(.*)\.mp3$| and not exists "$parentpath/$1.ogg"' -execdir ffmpeg -i '$1.mp3' '$1.ogg'
 ```
 
 TODO:
